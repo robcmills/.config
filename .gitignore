@@ -1,0 +1,16 @@
+*.DS_Store
+
+brew/
+fish/
+gh/
+github-copilot/
+iterm2/
+jgit/
+kitty/
+mc/
+nvim/
+op/
+rio/
+tmp/
+yarn/
+zed/
