@@ -1,0 +1,23 @@
+[font]
+size = 18
+
+[font.normal]
+family = "0xProto Nerd Font Mono"
+
+[[keyboard.bindings]]
+action = "CreateNewWindow"
+key = "N"
+mods = "Command"
+
+[[keyboard.bindings]]
+chars = "\u0002"
+key = "P"
+mods = "Command"
+
+[window]
+decorations = "none"
+startup_mode = "Maximized"
+
+[shell]
+program = "/opt/homebrew/bin/bash"
+args = ["-l"]
