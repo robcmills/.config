@@ -24,6 +24,8 @@ parse_git_branch() {
 }
 PS1="${COLOR_DIR}\w ${COLOR_GIT}\$(parse_git_branch)${COLOR_DEF}» "
 
+export SHELL='/opt/homebrew/bin/bash'
+
 # neovim
 export EDITOR='nvim'
 alias nv='nvim'
