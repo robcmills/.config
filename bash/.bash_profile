@@ -6,10 +6,10 @@ export PATH=~/.local/bin:$PATH
 # homebrew
 export PATH=/opt/homebrew/bin:$PATH
 
-# yarn path
+# yarn
 export PATH="$HOME/.yarn/bin:$PATH"
-
 alias y='yarn'
+alias yd='yarn dev'
 
 # prompt
 # Set colors for bash using escape sequences
@@ -22,7 +22,7 @@ export LSCOLORS=ExFxBxDxCxegedabagacad
 parse_git_branch() {
   git branch 2> /dev/null | sed -n -e 's/^\* \(.*\)/[\1]/p'
 }
-PS1="${COLOR_DIR}\w ${COLOR_GIT}\$(parse_git_branch)${COLOR_DEF}» "
+PS1="${COLOR_DIR}\w ${COLOR_GIT}\$(parse_git_branch)${COLOR_DEF}\n» "
 
 export SHELL='/opt/homebrew/bin/bash'
 
@@ -44,13 +44,37 @@ alias ta="tmux -u -f $TMUX_CONFIG attach"
 alias tt="nv $TMUX_CONFIG"
 
 # git
-alias gt='~/git-recent.sh'
+function recent_branches() {
+  local branches
+  branches=$(git for-each-ref --count=9 --sort=-committerdate refs/heads/ --format="%(refname:short)")
+  echo "Recent branches:"
+  echo "0) Cancel"
+  echo "$branches" | nl -w 1 -n ln -s ') '
+  read -p "Select a branch: " choice
 
-# jq
-alias jq="~/jq-osx-amd64"
+  if ! [[ $choice =~ ^[0-9]+$ ]]; then
+    echo "Invalid selection. Must be a number."
+    return 1
+  fi
+
+  if [ "$choice" -eq 0 ]; then
+    echo "Operation cancelled"
+    return 0
+  fi
+
+  if [ "$choice" -gt $(echo "$branches" | wc -l) ]; then
+    echo "Invalid selection."
+    return 1
+  fi
+
+  selected_branch=$(echo "$branches" | sed -n "${choice}p")
+  git checkout "$selected_branch"
+}
+alias gt='recent_branches'
 
 # password
 alias pw="~/password.sh"
+source ~/.keys
 
 # disk usage
 alias dus="du -hs .[^.]* | sort -h"
@@ -95,8 +119,10 @@ alias dsa='docker stop $(docker ps -a -q)'
 
 export OPENSPACE_EMAIL=rob@openspace.ai
 
+alias brave='open -a "Brave Browser"'
+alias chrome='open -a "Google Chrome"'
 # reviews (PR's that need review assigned to me)
-alias rev='edge "https://github.com/openspacelabs/openspace/pulls/review-requested/robcmills"'
+alias rev='brave "https://github.com/openspacelabs/openspace/pulls/review-requested/robcmills"'
 
 # frontend
 alias ice='cd ~/src/openspace/web/icedemon/ && nv .'
@@ -108,7 +134,9 @@ alias lnvm=". $NVM_DIR/nvm.sh"
 # Automatically switch to the Node version specified in the .nvmrc file
 nvm_auto_switch() {
   if [[ -f .nvmrc && -r .nvmrc ]]; then
-    lnvm && nvm use
+  lnvm
+  export PATH="$NVM_DIR/versions/node/$(nvm current)/bin:$PATH"
+  nvm use
   fi
 }
 # Override the 'cd' command
@@ -119,6 +147,10 @@ cd() {
 nvm_auto_switch
 
 # backend
+
+# ensure java is available to yarn install which runs openapi-codegen-cli
+export JAVA_HOME="$HOME/.sdkman/candidates/java/current"
+# source "$HOME/.sdkman/bin/sdkman-init.sh"
 
 # aws auth
 export AWS_PROFILE=os-dev 
@@ -159,3 +191,6 @@ alias pe="psql -U openspace -d openspace -h postgres.eng-23327.svc.cluster.local
 # alias pp='psql -h us-prod-ro.db.openspace.ai -U readonly -d openspace'
 alias pp='psql -h openspace-prod-replica.cpk74q4e5ebg.us-west-2.rds.amazonaws.com -U readonly -d openspace'
 # url format: postgresql://readonly@openspace-prod-replica.cpk74q4e5ebg.us-west-2.rds.amazonaws.com/openspace
+
+# Set up fzf key bindings and fuzzy completion
+eval "$(fzf --bash)"

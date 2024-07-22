@@ -1,6 +1,6 @@
--- Homerow bindings (not available)
--- Hyper + U = Search shortcut
--- Hyper + Space = Labels-only shortcut
+-- Must run this to set non-default config dir
+-- defaults write org.hammerspoon.Hammerspoon MJConfigFile "~/.config/hammerspoon/init.lua"
+-- https://github.com/Hammerspoon/hammerspoon/pull/582
 
 -- Fast app switching
 local fast_apps = {
