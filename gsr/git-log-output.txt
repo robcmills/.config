@@ -1,0 +1,11 @@
+
+797cc14263 - Dave Martinez - 2024-09-09 
+diff --git a/web/icedemon/src/js/projects/org/OrgView/OrgChecklists/OrgChecklistsTemplateListView.tsx b/web/icedemon/src/js/projects/org/OrgView/OrgChecklists/OrgChecklistsTemplateListView.tsx
++  const { mutate: deleteTemplate } =
+diff --git a/web/icedemon/src/js/projects/site/ChecklistTemplates/ChecklistTemplateListView/ChecklistTemplateListView.tsx b/web/icedemon/src/js/projects/site/ChecklistTemplates/ChecklistTemplateListView/ChecklistTemplateListView.tsx
++  const { mutate: deleteTemplate } = useDeleteChecklistTemplateMutation();
+
+629a813ab0 - Eric Krueger - 2024-09-06 
+diff --git a/web/icedemon/src/js/site/uploads/UploadDetailDialog/UploadSidebar/LocationView/useLocationState.tsx b/web/icedemon/src/js/site/uploads/UploadDetailDialog/UploadSidebar/LocationView/useLocationState.tsx
++  const { mutate, isLoading } = usePhotoLocationMutation({
++      mutate({ position, sheet });

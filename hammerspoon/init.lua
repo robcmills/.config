@@ -19,6 +19,7 @@ local fast_apps = {
   V = 'Visual Studio Code',
   W = 'Warp',
   Y = 'Activity Monitor',
+  Z = 'Zen Browser',
 }
 for key, app in pairs(fast_apps) do
   hs.hotkey.bind({ 'cmd', 'alt', 'ctrl', 'shift' }, key, function()

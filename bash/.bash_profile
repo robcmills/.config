@@ -183,7 +183,7 @@ alias pc="psql -U openspace -d openspace -h postgres.cypress.svc.cluster.local"
 # connect to ephemeral stack db
 # password in is 1Password -> OpenSpace -> K8 DB creds (for dev ephemeral postgres containers)
 alias pe="psql -U openspace -d openspace -h postgres.eng-23327.svc.cluster.local"
-# as a single connection url: postgresql://openspace@postgres.eng-23327.svc.cluster.local/openspace
+# as a single connection url: postgresql://openspace@postgres.eng-25088.svc.cluster.local/openspace
 # url format: postgresql://[user]@[host]/[database]
 
 # Production readonly replica
@@ -191,6 +191,7 @@ alias pe="psql -U openspace -d openspace -h postgres.eng-23327.svc.cluster.local
 # alias pp='psql -h us-prod-ro.db.openspace.ai -U readonly -d openspace'
 alias pp='psql -h openspace-prod-replica.cpk74q4e5ebg.us-west-2.rds.amazonaws.com -U readonly -d openspace'
 # url format: postgresql://readonly@openspace-prod-replica.cpk74q4e5ebg.us-west-2.rds.amazonaws.com/openspace
+# url format: postgresql://readonly@us-prod-ro.db.openspace.ai/openspace
 
 # Set up fzf key bindings and fuzzy completion
 eval "$(fzf --bash)"
@@ -205,6 +206,26 @@ export NVM_DIR="$HOME/.nvm"
 # bun
 export BUN_INSTALL="$HOME/.bun"
 export PATH=$BUN_INSTALL/bin:$PATH
+
+# ANSI color codes
+ESC=$(printf '\033')
+BLUE="${ESC}[34m"
+CYAN="${ESC}[36m"
+GREEN="${ESC}[32m"
+NC="${ESC}[0m"
+PURPLE="${ESC}[35m"
+RED="${ESC}[31m"
+YELLOW="${ESC}[33m"
+
+git_search_recent() {
+  query="$1"
+  git --no-pager log -G $query -n 10 -p --date=short --pretty=format:'%h - %an - %ad %n%b' \
+    | grep -E "(^[0-9a-f]{7,40}|^diff|$query)" \
+    | sed -E "s/^([a-f0-9]+) - (.+) - ([0-9-]+)/\n${PURPLE}\1${NC} - ${CYAN}\2${NC} - ${GREEN}\3${NC}/g" \
+    | sed -E "s/^diff --git a\/(.*) b\/.*/${YELLOW}\1${NC}/" \
+    | sed -E "s/($query)/${BLUE}\1${NC}/g"
+}
+alias gsr=git_search_recent
 
 #THIS MUST BE AT THE END OF THE FILE FOR SDKMAN TO WORK!!!
 export SDKMAN_DIR="$HOME/.sdkman"
