@@ -17,11 +17,21 @@ COLOR_DEF='\[\e[0m\]' # Default color
 COLOR_USR='\[\e[38;5;243m\]' # User color (grey)
 COLOR_DIR='\[\e[38;5;82m\]' # Directory color (green)
 COLOR_GIT='\[\e[38;5;39m\]' # Git branch color (blue)
+COLOR_VENV='\[\e[38;5;213m\]' # Virtual env color (pink)
+
 export CLICOLOR=1
 export LSCOLORS=ExFxBxDxCxegedabagacad
+
 parse_git_branch() {
   git branch 2> /dev/null | sed -n -e 's/^\* \(.*\)/[\1]/p'
 }
+
+show_virtual_env() {
+  if [ -n "$VIRTUAL_ENV" ]; then
+    echo "($(basename $VIRTUAL_ENV))"
+  fi
+}
+
 PS1="${COLOR_DIR}\w ${COLOR_GIT}\$(parse_git_branch)${COLOR_DEF}\n» "
 
 export SHELL='/opt/homebrew/bin/bash'
@@ -173,23 +183,34 @@ export E2E_BIND_PGPORT=5432
 ## psql connections
 
 # tailscale: https://openspaceai.atlassian.net/wiki/spaces/ENG/pages/1300955174/Tailscale+Quick+Start
-# use db pw from 1Password entries corresponding to the host
+
+# staging.db.osdevenv.net
+# as a single connection url: postgresql://openspace@staging.db.osdevenv.net/openspace
+
+# use db pw from 1Password entries corresponding to the host (development.db.osdevenv.net)
 alias pd="psql -U openspace -d openspace -h development.db.osdevenv.net"
 # as a single connection url: postgresql://openspace@development.db.osdevenv.net/openspace
 
 alias pj="psql -U openspace -d openspace -h jpn-prod-ro.db.openspace.ai"
+
 # cypress env is not an rds so use db pw from 1password "K8 DB creds (for dev ephemeral postgres containers)"
 alias pc="psql -U openspace -d openspace -h postgres.cypress.svc.cluster.local"
+# as a single connection url: postgresql://openspace@postgres.cypress.svc.cluster.local/openspace
+
 # connect to ephemeral stack db
 # password in is 1Password -> OpenSpace -> K8 DB creds (for dev ephemeral postgres containers)
 alias pe="psql -U openspace -d openspace -h postgres.eng-23327.svc.cluster.local"
-# as a single connection url: postgresql://openspace@postgres.eng-25088.svc.cluster.local/openspace
+# as a single connection url: postgresql://openspace@postgres.pr-7244.svc.cluster.local/openspace
+# as a single connection url: postgresql://openspace@postgres.eng-25384.svc.cluster.local/openspace
 # url format: postgresql://[user]@[host]/[database]
 
 # Production readonly replica
 # passwords in 1Password -> OpenSpace -> DataOps
 # alias pp='psql -h us-prod-ro.db.openspace.ai -U readonly -d openspace'
 alias pp='psql -h openspace-prod-replica.cpk74q4e5ebg.us-west-2.rds.amazonaws.com -U readonly -d openspace'
+
+# psql
+
 # url format: postgresql://readonly@openspace-prod-replica.cpk74q4e5ebg.us-west-2.rds.amazonaws.com/openspace
 # url format: postgresql://readonly@us-prod-ro.db.openspace.ai/openspace
 
@@ -225,8 +246,37 @@ git_search_recent() {
     | sed -E "s/^diff --git a\/(.*) b\/.*/${YELLOW}\1${NC}/" \
     | sed -E "s/($query)/${BLUE}\1${NC}/g"
 }
+
 alias gsr=git_search_recent
+
+# https://github.com/openspacelabs/openspace/pull/2356
+debugprod() {
+  echo "get https://openspace.ai/api/self/cookie-jar
+  save as ~/cookie-jar.txt
+  Open config/local/BuildDev.js file.
+  Set devServer property to:
+  devServer: {
+    url: 'https://openspace.ai',
+    cookieJar: '~/cookie-jar.txt',
+  },
+  then run dev server\n"
+}
+
+alias dbp=debugprod
+
+# Cron job that runs every day and pulls translations from lokalise and uploads to s3
+# https://tc-ci.openspace.ai/buildConfiguration/Openspace_ReleaseManagementBuild_Translations/443157?expandBuildDeploymentsSection=false&hideTestsFromDependencies=false&hideProblemsFromDependencies=false&expandBuildChangesSection=true&showLog=443157_281_142&logView=flowAware
+
+# python
+# Setting PATH for Python 3.12
+# The original version is saved in .bash_profile.pysave
+PATH="/Library/Frameworks/Python.framework/Versions/3.12/bin:${PATH}"
+export PATH
+
+# deno
+. "/Users/robcmills/.deno/env"
 
 #THIS MUST BE AT THE END OF THE FILE FOR SDKMAN TO WORK!!!
 export SDKMAN_DIR="$HOME/.sdkman"
 [[ -s "$HOME/.sdkman/bin/sdkman-init.sh" ]] && source "$HOME/.sdkman/bin/sdkman-init.sh"
+

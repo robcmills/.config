@@ -6,10 +6,10 @@
 local fast_apps = {
   A = 'Alacritty',
   B = 'Brave Browser',
-  C = 'Google Chrome',
+  C = 'Cursor',
   E = 'Microsoft Edge',
   F = 'Finder',
-  G = 'Preview',
+  G = 'Godot',
   H = 'Hyper',
   I = 'Intellij IDEA',
   M = 'Google Meet',
