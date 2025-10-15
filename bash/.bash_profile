@@ -131,7 +131,7 @@ function notify_failure() {
 # background git push
 function git_push() {
   (
-    local log_file="~/git/git-push-$(date +%Y%m%d-%H%M%S).log"
+    local log_file="/tmp/git-push-$(date +%Y%m%d-%H%M%S).log"
     git push > "$log_file" 2>&1
     if [ $? -eq 0 ]; then
       notify_success "Git push completed successfully!" "$log_file"
@@ -139,6 +139,7 @@ function git_push() {
     else
       notify_failure "Git push failed! Check log: $log_file"
     fi
+    sleep 10
   ) &
   echo "[Background] Git push started (PID: $!)"
 }
