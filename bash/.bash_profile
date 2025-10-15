@@ -1,5 +1,8 @@
 # path
 
+# pico8
+export PATH=~/pico8/bin:$PATH
+
 # aws cli
 export PATH=~/.local/bin:$PATH
 
@@ -84,6 +87,7 @@ alias gt='recent_branches'
 
 # password
 alias pw="~/password.sh"
+# api keys env vars and secrets
 source ~/.keys
 
 # disk usage
@@ -92,14 +96,13 @@ alias dus="du -hs .[^.]* | sort -h"
 # git
 alias gs='git status --short --branch'
 alias gsl='git status'
-alias gstash='git stash --include-untracked'
+alias gst='git stash --include-untracked'
 alias gss='git stash show -p'
 alias ga='git add --all :/'
 alias gc="git add --all && git commit"
 alias gd="git --no-pager diff"
 alias gb="git branch"
 alias gk="git checkout"
-alias gp="git push"
 alias gl="git pull"
 alias gf="git fetch"
 alias gr="git reset --hard"
@@ -118,6 +121,30 @@ alias gcm="git cherry -v master" # show only non-merge commits
 alias gcv="git cherry -v development" # show only non-merge commits
 alias gx="git diff --name-only --diff-filter=U" # show only conflicted files
 
+function notify_success() {
+  osascript -e "display notification \"$1\" with title \"Git Push\" subtitle \"Success\""
+}
+function notify_failure() {
+  osascript -e "display notification \"Failed: $2\" with title \"Git Push\" subtitle \"Error\""
+}
+
+# background git push
+function git_push() {
+  (
+    local log_file="~/git/git-push-$(date +%Y%m%d-%H%M%S).log"
+    git push > "$log_file" 2>&1
+    if [ $? -eq 0 ]; then
+      notify_success "Git push completed successfully!" "$log_file"
+      rm "$log_file"
+    else
+      notify_failure "Git push failed! Check log: $log_file"
+    fi
+  ) &
+  echo "[Background] Git push started (PID: $!)"
+}
+alias gp="git_push"
+
+
 # docker
 alias d="docker"
 alias dm="docker-machine"
@@ -126,6 +153,8 @@ alias dpsa="docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Size}}\t{{.C
 alias dsa='docker stop $(docker ps -a -q)'
 
 ## OpenSpace
+
+# https://nexus.osdevenv.net/#browse/browse
 
 export OPENSPACE_EMAIL=rob@openspace.ai
 
@@ -168,6 +197,16 @@ export AWS_REGION=us-west-2
 alias al='aws sso login --profile os-dev'
 alias ai='aws sts get-caller-identity'
 
+# https://docs.anthropic.com/en/docs/claude-code/amazon-bedrock
+# Enable Bedrock integration for Claude Code
+# export CLAUDE_CODE_USE_BEDROCK=1
+# aws bedrock list-inference-profiles --region us-west-2 | jq '[.[][] | .inferenceProfileId]'
+# export ANTHROPIC_MODEL='us.anthropic.claude-sonnet-4-20250514-v1:0'
+# export ANTHROPIC_SMALL_FAST_MODEL='us.anthropic.claude-3-5-haiku-20241022-v1:0'
+# Recommended output token settings for Bedrock
+# export CLAUDE_CODE_MAX_OUTPUT_TOKENS=4096
+# export MAX_THINKING_TOKENS=1024
+
 # make local (this is the one Chris Hut uses)
 alias ml='make e2e-local-build WORKERS=1 UPLOADS=1 ONEX_ENABLED=1 ONER_ENABLED=0 ONEX2_ENABLED=0 Z1_ENABLED=0 X3_ENABLED=0 SPHERE_ENABLED=0 SKIP_TESTS=TRUE'
 
@@ -200,8 +239,12 @@ alias pc="psql -U openspace -d openspace -h postgres.cypress.svc.cluster.local"
 # connect to ephemeral stack db
 # password in is 1Password -> OpenSpace -> K8 DB creds (for dev ephemeral postgres containers)
 alias pe="psql -U openspace -d openspace -h postgres.eng-23327.svc.cluster.local"
-# as a single connection url: postgresql://openspace@postgres.pr-7244.svc.cluster.local/openspace
-# as a single connection url: postgresql://openspace@postgres.eng-25384.svc.cluster.local/openspace
+# https://rad-1795-members.osdevenv.net/orgs
+# as a single connection url: postgresql://openspace@postgres.rad-1795-members.svc.cluster.local/openspace
+# as a single connection url: postgresql://openspace@postgres.pr-8099.svc.cluster.local/openspace
+# as a single connection url: postgresql://openspace@postgres.group-admin.svc.cluster.local/openspace
+# as a single connection url: postgresql://openspace@postgres.rad-5186.svc.cluster.local/openspace
+# as a single connection url: postgresql://openspace@postgres.perseus.svc.cluster.local/openspace
 # url format: postgresql://[user]@[host]/[database]
 
 # Production readonly replica
@@ -209,13 +252,12 @@ alias pe="psql -U openspace -d openspace -h postgres.eng-23327.svc.cluster.local
 # alias pp='psql -h us-prod-ro.db.openspace.ai -U readonly -d openspace'
 alias pp='psql -h openspace-prod-replica.cpk74q4e5ebg.us-west-2.rds.amazonaws.com -U readonly -d openspace'
 
-# psql
-
 # url format: postgresql://readonly@openspace-prod-replica.cpk74q4e5ebg.us-west-2.rds.amazonaws.com/openspace
 # url format: postgresql://readonly@us-prod-ro.db.openspace.ai/openspace
+# latest: us-prod-ro.db.openspace.ai
 
 # Set up fzf key bindings and fuzzy completion
-eval "$(fzf --bash)"
+# eval "$(fzf --bash)"
 
 # Automatically added stuff
 
@@ -240,7 +282,7 @@ YELLOW="${ESC}[33m"
 
 git_search_recent() {
   query="$1"
-  git --no-pager log -G $query -n 10 -p --date=short --pretty=format:'%h - %an - %ad %n%b' \
+  git --no-pager log -G "$query" -n 10 -p --date=short --pretty=format:'%h - %an - %ad %n%b' \
     | grep -E "(^[0-9a-f]{7,40}|^diff|$query)" \
     | sed -E "s/^([a-f0-9]+) - (.+) - ([0-9-]+)/\n${PURPLE}\1${NC} - ${CYAN}\2${NC} - ${GREEN}\3${NC}/g" \
     | sed -E "s/^diff --git a\/(.*) b\/.*/${YELLOW}\1${NC}/" \
@@ -248,6 +290,17 @@ git_search_recent() {
 }
 
 alias gsr=git_search_recent
+
+
+rm_node_modules_progress() {
+  # Count total files first
+  total=$(find node_modules -type f | wc -l)
+  # Use pv to show progress
+  find node_modules -type f -print0 | pv -0 -l -s $total | xargs -0 rm -f
+  rm -rf node_modules
+}
+
+alias rmn=rm_node_modules_progress
 
 # https://github.com/openspacelabs/openspace/pull/2356
 debugprod() {
@@ -264,6 +317,8 @@ debugprod() {
 
 alias dbp=debugprod
 
+# fix type errors with ai agent
+
 # Cron job that runs every day and pulls translations from lokalise and uploads to s3
 # https://tc-ci.openspace.ai/buildConfiguration/Openspace_ReleaseManagementBuild_Translations/443157?expandBuildDeploymentsSection=false&hideTestsFromDependencies=false&hideProblemsFromDependencies=false&expandBuildChangesSection=true&showLog=443157_281_142&logView=flowAware
 
@@ -273,8 +328,38 @@ alias dbp=debugprod
 PATH="/Library/Frameworks/Python.framework/Versions/3.12/bin:${PATH}"
 export PATH
 
+# Python is installed as
+#   /opt/homebrew/bin/python3.11
+#
+# Unversioned and major-versioned symlinks `python`, `python3`, `python-config`, `python3-config`, `pip`, `pip3`, etc. pointing to
+# `python3.11`, `python3.11-config`, `pip3.11` etc., respectively, are installed into
+#   /opt/homebrew/opt/python@3.11/libexec/bin
+#
+# You can install Python packages with
+#   pip3.11 install <package>
+# They will install into the site-package directory
+#   /opt/homebrew/lib/python3.11/site-packages
+#
+# `idle3.11` requires tkinter, which is available separately:
+#   brew install python-tk@3.11
+#
+# gdbm (`dbm.gnu`) is no longer included in this formula, but it is available separately:
+#   brew install python-gdbm@3.11
+# `dbm.ndbm` changed database backends in Homebrew Python 3.11.
+# If you need to read a database from a previous Homebrew Python created via `dbm.ndbm`,
+# you'll need to read your database using the older version of Homebrew Python and convert to another format.
+# `dbm` still defaults to `dbm.gnu` when it is installed.
+#
+# If you do not need a specific version of Python, and always want Homebrew's `python3` in your PATH:
+#   brew install python3
+#
+# For more information about Homebrew and Python, see: https://docs.brew.sh/Homebrew-and-Python
+
 # deno
 . "/Users/robcmills/.deno/env"
+
+# rust
+. "$HOME/.cargo/env"
 
 #THIS MUST BE AT THE END OF THE FILE FOR SDKMAN TO WORK!!!
 export SDKMAN_DIR="$HOME/.sdkman"

@@ -1,8 +1,8 @@
 [font]
-size = 18
+size = 20
 
 [font.normal]
-family = "0xProto Nerd Font Mono"
+family = "Hack Nerd Font Mono"
 
 [[keyboard.bindings]]
 action = "CreateNewWindow"

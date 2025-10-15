@@ -1,0 +1,18 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "autoupdate": true,
+  "keybinds": {
+    "messages_page_up": "shift+up",
+    "messages_page_down": "shift+down",
+    "messages_half_page_up": "ctrl+e",
+    "messages_half_page_down": "ctrl+n",
+    "messages_first": "ctrl+g",
+    "messages_last": "ctrl+shift+g"
+  },
+  "model": "anthropic/claude-sonnet-4-20250514",
+  "permission": {
+    "bash": "ask",
+    "edit": "ask"
+  },
+  "theme": "system"
+}

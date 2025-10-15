@@ -6,14 +6,14 @@
 local fast_apps = {
   A = 'Alacritty',
   B = 'Brave Browser',
-  C = 'Cursor',
+  C = 'Google Chrome',
   E = 'Microsoft Edge',
   F = 'Finder',
   G = 'Godot',
-  H = 'Hyper',
   I = 'Intellij IDEA',
   M = 'Google Meet',
   P = '1Password',
+  R = 'Cursor',
   S = 'Slack',
   T = 'Cypress',
   V = 'Visual Studio Code',
@@ -43,7 +43,7 @@ end)
 
 
 -- Reload hammerspoon config
-hs.hotkey.bind({ 'cmd', 'alt', 'ctrl', 'shift' }, 'R', function()
+hs.hotkey.bind({ 'cmd', 'alt', 'ctrl', 'shift' }, 'H', function()
   hs.reload()
 end)
 
