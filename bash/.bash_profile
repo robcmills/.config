@@ -57,7 +57,7 @@ alias ta="tmux -u -f $TMUX_CONFIG attach"
 alias tt="nv $TMUX_CONFIG"
 
 # git
-function recent_branches() {
+recent_branches() {
   local branches
   branches=$(git for-each-ref --count=9 --sort=-committerdate refs/heads/ --format="%(refname:short)")
   echo "Recent branches:"
@@ -121,12 +121,12 @@ alias gcm="git cherry -v master" # show only non-merge commits
 alias gcv="git cherry -v development" # show only non-merge commits
 alias gx="git diff --name-only --diff-filter=U" # show only conflicted files
 
-function notify() {
+notify() {
   osascript -e "display notification \"$1\""
 }
 
 # background git push
-function git_push() {
+git_push() {
   (
     local log_file="/tmp/git-push-$(date +%Y%m%d-%H%M%S).log"
     git push > "$log_file" 2>&1
@@ -137,7 +137,7 @@ function git_push() {
       notify "Git push failed! Check log: $log_file"
       sleep 10
     fi
-  ) &
+  ) & disown
   echo "[Background] Git push started (PID: $!)"
 }
 alias gp="git_push"
