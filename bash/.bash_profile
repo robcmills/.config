@@ -121,11 +121,8 @@ alias gcm="git cherry -v master" # show only non-merge commits
 alias gcv="git cherry -v development" # show only non-merge commits
 alias gx="git diff --name-only --diff-filter=U" # show only conflicted files
 
-function notify_success() {
-  osascript -e "display notification \"$1\" with title \"Git Push\" subtitle \"Success\""
-}
-function notify_failure() {
-  osascript -e "display notification \"Failed: $2\" with title \"Git Push\" subtitle \"Error\""
+function notify() {
+  osascript -e "display notification \"$1\""
 }
 
 # background git push
@@ -134,12 +131,12 @@ function git_push() {
     local log_file="/tmp/git-push-$(date +%Y%m%d-%H%M%S).log"
     git push > "$log_file" 2>&1
     if [ $? -eq 0 ]; then
-      notify_success "Git push completed successfully!" "$log_file"
+      notify "Git push success"
       rm "$log_file"
     else
-      notify_failure "Git push failed! Check log: $log_file"
+      notify "Git push failed! Check log: $log_file"
+      sleep 10
     fi
-    sleep 10
   ) &
   echo "[Background] Git push started (PID: $!)"
 }
