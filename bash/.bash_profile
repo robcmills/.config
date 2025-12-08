@@ -1,5 +1,8 @@
 # path
 
+# love2d
+export PATH=/Applications/love.app/Contents/MacOS:$PATH
+
 # pico8
 export PATH=~/pico8/bin:$PATH
 
@@ -131,14 +134,14 @@ git_push() {
     local log_file="/tmp/git-push-$(date +%Y%m%d-%H%M%S).log"
     git push > "$log_file" 2>&1
     if [ $? -eq 0 ]; then
-      notify "Git push success"
+      notify "Git push success\n$(cat $log_file)"
       rm "$log_file"
     else
       notify "Git push failed! Check log: $log_file"
       sleep 10
     fi
   ) & disown
-  echo "[Background] Git push started (PID: $!)"
+  # echo "[Background] Git push started (PID: $!)"
 }
 alias gp="git_push"
 
@@ -164,24 +167,31 @@ alias rev='brave "https://github.com/openspacelabs/openspace/pulls/review-reques
 # frontend
 alias ice='cd ~/src/openspace/web/icedemon/ && nv .'
 
+# fnm (fast node version manager)
+# https://github.com/Schniz/fnm
+eval "$(fnm env --use-on-cd --shell bash)"
+
+
 # nvm
 export NVM_DIR="$HOME/.nvm"
+# [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
+# [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+
 alias lnvm=". $NVM_DIR/nvm.sh"
 
 # Automatically switch to the Node version specified in the .nvmrc file
-nvm_auto_switch() {
-  if [[ -f .nvmrc && -r .nvmrc ]]; then
-  lnvm
-  export PATH="$NVM_DIR/versions/node/$(nvm current)/bin:$PATH"
-  nvm use
-  fi
-}
+# nvm_auto_switch() {
+#   if [[ -f .nvmrc && -r .nvmrc ]]; then
+#   lnvm
+#   export PATH="$NVM_DIR/versions/node/$(nvm current)/bin:$PATH"
+#   nvm use
+#   fi
+# }
 # Override the 'cd' command
-cd() {
-  builtin cd "$@" && nvm_auto_switch
-}
-
-nvm_auto_switch
+# cd() {
+#   builtin cd "$@" && nvm_auto_switch
+# }
+# nvm_auto_switch
 
 # backend
 
@@ -239,7 +249,7 @@ alias pc="psql -U openspace -d openspace -h postgres.cypress.svc.cluster.local"
 alias pe="psql -U openspace -d openspace -h postgres.eng-23327.svc.cluster.local"
 # https://rad-1795-members.osdevenv.net/orgs
 # as a single connection url: postgresql://openspace@postgres.rad-1795-members.svc.cluster.local/openspace
-# as a single connection url: postgresql://openspace@postgres.pr-8099.svc.cluster.local/openspace
+# as a single connection url: postgresql://openspace@postgres.pr-8944.svc.cluster.local/openspace
 # as a single connection url: postgresql://openspace@postgres.group-admin.svc.cluster.local/openspace
 # as a single connection url: postgresql://openspace@postgres.rad-5186.svc.cluster.local/openspace
 # as a single connection url: postgresql://openspace@postgres.perseus.svc.cluster.local/openspace
@@ -250,6 +260,8 @@ alias pe="psql -U openspace -d openspace -h postgres.eng-23327.svc.cluster.local
 # alias pp='psql -h us-prod-ro.db.openspace.ai -U readonly -d openspace'
 alias pp='psql -h openspace-prod-replica.cpk74q4e5ebg.us-west-2.rds.amazonaws.com -U readonly -d openspace'
 
+# ksa 
+
 # url format: postgresql://readonly@openspace-prod-replica.cpk74q4e5ebg.us-west-2.rds.amazonaws.com/openspace
 # url format: postgresql://readonly@us-prod-ro.db.openspace.ai/openspace
 # latest: us-prod-ro.db.openspace.ai
@@ -258,11 +270,6 @@ alias pp='psql -h openspace-prod-replica.cpk74q4e5ebg.us-west-2.rds.amazonaws.co
 # eval "$(fzf --bash)"
 
 # Automatically added stuff
-
-# nvm
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
-[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
 
 # bun
 export BUN_INSTALL="$HOME/.bun"

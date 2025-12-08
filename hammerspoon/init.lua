@@ -2,6 +2,9 @@
 -- defaults write org.hammerspoon.Hammerspoon MJConfigFile "~/.config/hammerspoon/init.lua"
 -- https://github.com/Hammerspoon/hammerspoon/pull/582
 
+-- enable hs cli
+require("hs.ipc")
+
 -- Fast app switching
 local fast_apps = {
   A = 'Alacritty',
