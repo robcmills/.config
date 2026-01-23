@@ -266,6 +266,21 @@ alias pp='psql -h openspace-prod-replica.cpk74q4e5ebg.us-west-2.rds.amazonaws.co
 # url format: postgresql://readonly@us-prod-ro.db.openspace.ai/openspace
 # latest: us-prod-ro.db.openspace.ai
 
+# Jason Becker
+# https://openspace--team.slack.com/archives/C03QWGD2MRU/p1768427361406859?thread_ts=1768410232.488889&cid=C03QWGD2MRU
+# I have this little script I wrote into my zshrc file that I run every morning first thing when I turn my computer back on and I never run into problems like this anymore
+start_openspace() {
+  cd $HOME/src/openspace
+  source $HOME/bin/aws-authenticate
+  eval $(op signin)
+  kubectl config use-context docker-desktop
+  make k8-clean-all
+  docker system prune --all --volumes -f
+  docker volume prune --all -f
+  docker builder prune --all -f
+  make skaffold-run
+}
+
 # Set up fzf key bindings and fuzzy completion
 # eval "$(fzf --bash)"
 
