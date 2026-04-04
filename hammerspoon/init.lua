@@ -50,4 +50,8 @@ hs.hotkey.bind({ 'cmd', 'alt', 'ctrl', 'shift' }, 'H', function()
   hs.reload()
 end)
 
+-- Voice command system (wake word + commands)
+local voice = require("voice")
+voice.start()
+
 hs.alert.show('Config loaded')

@@ -1,3 +1,6 @@
+# claude code
+alias cc='claude'
+
 # path
 
 # love2d
@@ -196,8 +199,10 @@ alias lnvm=". $NVM_DIR/nvm.sh"
 # backend
 
 # ensure java is available to yarn install which runs openapi-codegen-cli
-export JAVA_HOME="$HOME/.sdkman/candidates/java/current"
+# export JAVA_HOME="$HOME/.sdkman/candidates/java/current" # old
+# export JAVA_HOME="/Library/Java/JavaVirtualMachines/microsoft-25.jdk/Contents/Home"
 # source "$HOME/.sdkman/bin/sdkman-init.sh"
+# sdkman sets this
 
 # aws auth
 export AWS_PROFILE=os-dev 
@@ -215,6 +220,8 @@ alias ai='aws sts get-caller-identity'
 # export CLAUDE_CODE_MAX_OUTPUT_TOKENS=4096
 # export MAX_THINKING_TOKENS=1024
 
+# make local k8s build 2026-04-01
+alias mk8='make k8-local-full-build 2>&1 | tee ~/k8-build-output.log' # with logging so agent can see
 # make local (this is the one Chris Hut uses)
 alias ml='make e2e-local-build WORKERS=1 UPLOADS=1 ONEX_ENABLED=1 ONER_ENABLED=0 ONEX2_ENABLED=0 Z1_ENABLED=0 X3_ENABLED=0 SPHERE_ENABLED=0 SKIP_TESTS=TRUE'
 
@@ -253,6 +260,7 @@ alias pe="psql -U openspace -d openspace -h postgres.eng-23327.svc.cluster.local
 # as a single connection url: postgresql://openspace@postgres.group-admin.svc.cluster.local/openspace
 # as a single connection url: postgresql://openspace@postgres.rad-5186.svc.cluster.local/openspace
 # as a single connection url: postgresql://openspace@postgres.perseus.svc.cluster.local/openspace
+# as a single connection url: postgresql://openspace@postgres.smart-sheets.svc.cluster.local/openspace
 # url format: postgresql://[user]@[host]/[database]
 
 # Production readonly replica

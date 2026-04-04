@@ -1,5 +1,5 @@
 [font]
-size = 20
+size = 16
 
 [font.normal]
 family = "Hack Nerd Font Mono"
@@ -21,3 +21,7 @@ startup_mode = "Maximized"
 [shell]
 program = "/opt/homebrew/bin/bash"
 args = ["-l"]
+
+[bell]
+duration = 1
+command = { program = "afplay", args = ["/System/Library/Sounds/Glass.aiff"] }
