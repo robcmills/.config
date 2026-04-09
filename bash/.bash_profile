@@ -61,6 +61,7 @@ export TMUX_CONFIG='~/.config/tmux/.tmux.conf'
 alias tn="tmux -u -f $TMUX_CONFIG new"
 alias ta="tmux -u -f $TMUX_CONFIG attach"
 alias tt="nv $TMUX_CONFIG"
+alias wt="$HOME/.config/bash/wt.sh"
 
 # git
 recent_branches() {
