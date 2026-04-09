@@ -24,11 +24,17 @@ local fast_apps = {
   Y = 'Activity Monitor',
   Z = 'Zen Browser',
 }
+-- Ensure bindings use US layout keycodes regardless of active layout at load time
+local prevLayout = hs.keycodes.currentLayout()
+if prevLayout ~= 'U.S.' then hs.keycodes.setLayout('U.S.') end
+
 for key, app in pairs(fast_apps) do
   hs.hotkey.bind({ 'cmd', 'alt', 'ctrl', 'shift' }, key, function()
     hs.application.launchOrFocus(app)
   end)
 end
+
+if prevLayout ~= 'U.S.' then hs.keycodes.setLayout(prevLayout) end
 
 -- Fast tmux window selection
 for i = 0, 9, 1 do
@@ -51,7 +57,7 @@ hs.hotkey.bind({ 'cmd', 'alt', 'ctrl', 'shift' }, 'H', function()
 end)
 
 -- Voice command system (wake word + commands)
-local voice = require("voice")
-voice.start()
+-- local voice = require("voice")
+-- voice.start()
 
 hs.alert.show('Config loaded')

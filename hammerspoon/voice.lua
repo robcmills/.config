@@ -81,6 +81,19 @@ local function onWake(_, _)
   end)
 end
 
+local function hideSpeechWindow()
+  hs.timer.doAfter(0.5, function()
+    local app = hs.application.get("Hammerspoon")
+    if not app then return end
+    for _, w in ipairs(app:allWindows()) do
+      local title = w:title() or ""
+      if title ~= "Hammerspoon Console" then
+        w:close()
+      end
+    end
+  end)
+end
+
 function M.start()
   -- Wake word listener
   wakeListener = hs.speech.listener.new("VoiceWake")
@@ -93,6 +106,7 @@ function M.start()
   cmdListener:setCallback(onCommand)
 
   wakeListener:start()
+  hideSpeechWindow()
   hs.alert.show("Voice commands active", 2)
 end
 
