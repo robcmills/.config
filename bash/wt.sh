@@ -77,6 +77,6 @@ case "${1:-}" in
     ;;
 
   *)
-    echo "Usage: wt {new|rm} [name]"
+    echo "Usage: wt {new|ls|rm} [name]"
     ;;
 esac
