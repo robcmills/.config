@@ -62,6 +62,7 @@ alias tn="tmux -u -f $TMUX_CONFIG new"
 alias ta="tmux -u -f $TMUX_CONFIG attach"
 alias tt="nv $TMUX_CONFIG"
 alias wt="$HOME/.config/bash/wt.sh"
+alias cs="$HOME/.config/bash/cs.sh"
 
 # git
 recent_branches() {
