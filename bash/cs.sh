@@ -137,13 +137,28 @@ done
 # Sort by priority prefix (first tab field, numeric), then strip prefix before display.
 sorted=$(printf '%s\n' "${rows[@]}" | sort -t$'\t' -k1,1n | sed $'s/^[0-9]*\t//')
 
+preview_cmd='
+  pid={2}; sid={5}; cwd={6}; trans={7}; status={8}
+  printf "pid:         %s\n" "$pid"
+  printf "session:     %s\n" "$sid"
+  printf "status:      %s\n" "$status"
+  printf "cwd:         %s\n" "$cwd"
+  printf "transcript:  %s\n" "$trans"
+  if [ -n "$trans" ] && [ -s "$trans" ]; then
+    printf "\n── first user message ──\n"
+    jq -r "select(.type==\"user\" and (.message.content|type)==\"string\") | .message.content" "$trans" 2>/dev/null | head -20
+    printf "\n── last assistant message ──\n"
+    jq -rs "map(select(.type==\"assistant\") | .message.content // [] | map(select(.type==\"text\") | .text) | join(\"\n\")) | map(select(length > 0)) | last // \"\"" "$trans" 2>/dev/null | head -20
+  fi
+'
+
 selected=$(printf '%s\n' "$sorted" | fzf \
   --layout=reverse \
   --delimiter=$'\t' \
   --with-nth=1 \
   --prompt='cs> ' \
-  --preview='printf "pid:         %s\nsession:     %s\nstatus:      %s\ncwd:         %s\ntranscript:  %s\n" {2} {5} {8} {6} {7}' \
-  --preview-window=down:6:wrap) || exit 0
+  --preview="$preview_cmd" \
+  --preview-window=down:60%:wrap) || exit 0
 
 IFS=$'\t' read -r _display pid wid pane_id sid cwd trans status <<<"$selected"
 
