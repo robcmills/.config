@@ -1,5 +1,5 @@
 # claude code
-alias cc='claude'
+alias cc='claude --chrome'
 
 # path
 
