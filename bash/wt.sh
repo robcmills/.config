@@ -27,6 +27,54 @@ get_project_config() {
   esac
 }
 
+is_project() {
+  case "$1" in
+    openspace|osutils) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+list_worktree_names() {
+  git -C "$REPO" worktree list --porcelain \
+    | grep '^worktree ' \
+    | sed 's/^worktree //' \
+    | grep "/${PROJECT_NAME}-" \
+    | sed "s|.*/${PROJECT_NAME}-||"
+}
+
+switch_to_worktree() {
+  local name="$1"
+  local worktree_path="$HOME/src/${PROJECT_NAME}-$name"
+
+  if tmux select-window -t "$name" 2>/dev/null; then
+    return 0
+  fi
+
+  local match
+  match=$(tmux list-panes -a -F '#{window_id} #{pane_current_path}' \
+    | while read -r wid wpath; do
+        case "$wpath" in "$worktree_path"*) echo "$wid"; break;; esac
+      done)
+  if [ -n "$match" ]; then
+    tmux select-window -t "$match"
+  else
+    echo "No tmux window found for worktree '$name'" >&2
+    return 1
+  fi
+}
+
+remove_worktree() {
+  local name="$1"
+  local worktree="$HOME/src/${PROJECT_NAME}-$name"
+  echo "Removing $name..."
+  tmux kill-window -t "$name" 2>/dev/null || true
+  if ! git -C "$REPO" worktree remove "$worktree" --force 2>/dev/null; then
+    rm -rf "$worktree"
+    git -C "$REPO" worktree prune
+  fi
+  echo "  Done"
+}
+
 case "${1:-}" in
   new)
     name="${2:-}"
@@ -70,14 +118,22 @@ case "${1:-}" in
     ;;
 
   ls)
-    project="${2:-openspace}"
+    shift
+    interactive=0
+    if [ "${1:-}" = "-i" ]; then
+      interactive=1
+      shift
+    fi
+    project="${1:-openspace}"
     get_project_config "$project"
 
-    worktrees=$(git -C "$REPO" worktree list --porcelain \
-      | grep '^worktree ' \
-      | sed 's/^worktree //' \
-      | grep "/${PROJECT_NAME}-" \
-      | sed "s|.*/${PROJECT_NAME}-||")
+    worktrees=$(list_worktree_names)
+
+    if [ "$interactive" -eq 0 ]; then
+      # Non-interactive: just print names, one per line.
+      [ -n "$worktrees" ] && echo "$worktrees"
+      exit 0
+    fi
 
     if [ -z "$worktrees" ]; then
       echo "No worktrees found"
@@ -85,55 +141,68 @@ case "${1:-}" in
     fi
 
     selected=$(echo "$worktrees" | fzf --layout=reverse --prompt="Select worktree: ") || exit 0
-    worktree_path="$HOME/src/${PROJECT_NAME}-$selected"
+    switch_to_worktree "$selected"
+    ;;
 
-    # Try matching by window name first
-    if ! tmux select-window -t "$selected" 2>/dev/null; then
-      # Fall back: find any pane (across all windows) inside the worktree directory
-      match=$(tmux list-panes -a -F '#{window_id} #{pane_current_path}' \
-        | while read -r wid wpath; do
-            case "$wpath" in "$worktree_path"*) echo "$wid"; break;; esac
-          done)
-      if [ -n "$match" ]; then
-        tmux select-window -t "$match"
-      else
-        echo "No tmux window found for worktree '$selected'"
-        exit 1
-      fi
+  switch)
+    name="${2:-}"
+    project="${3:-openspace}"
+    if [ -z "$name" ]; then
+      echo "Usage: wt switch <name> [project]" >&2
+      exit 1
     fi
+    get_project_config "$project"
+    switch_to_worktree "$name"
     ;;
 
   rm)
-    project="${2:-openspace}"
-    get_project_config "$project"
-
-    worktrees=$(git -C "$REPO" worktree list --porcelain \
-      | grep '^worktree ' \
-      | sed 's/^worktree //' \
-      | grep "/${PROJECT_NAME}-" \
-      | sed "s|.*/${PROJECT_NAME}-||")
-
-    if [ -z "$worktrees" ]; then
-      echo "No worktrees found"
-      exit 0
+    shift
+    interactive=0
+    if [ "${1:-}" = "-i" ]; then
+      interactive=1
+      shift
     fi
 
-    selected=$(echo "$worktrees" | fzf --multi --layout=reverse --prompt="Select worktrees to remove (TAB to multi-select): ") || exit 0
-
-    for name in $selected; do
-      worktree="$HOME/src/${PROJECT_NAME}-$name"
-      echo "Removing $name..."
-      tmux kill-window -t "$name" 2>/dev/null || true
-      if ! git -C "$REPO" worktree remove "$worktree" --force 2>/dev/null; then
-        rm -rf "$worktree"
-        git -C "$REPO" worktree prune
-      fi
-      echo "  Done"
+    # Separate trailing project arg (if any) from worktree names.
+    project="openspace"
+    names=()
+    for arg in "$@"; do
+      names+=("$arg")
     done
+    if [ "${#names[@]}" -gt 0 ] && is_project "${names[-1]}"; then
+      project="${names[-1]}"
+      unset 'names[-1]'
+    fi
+
+    get_project_config "$project"
+
+    if [ "$interactive" -eq 1 ]; then
+      worktrees=$(list_worktree_names)
+      if [ -z "$worktrees" ]; then
+        echo "No worktrees found"
+        exit 0
+      fi
+      selected=$(echo "$worktrees" | fzf --multi --layout=reverse --prompt="Select worktrees to remove (TAB to multi-select): ") || exit 0
+      for name in $selected; do
+        remove_worktree "$name"
+      done
+    else
+      if [ "${#names[@]}" -eq 0 ]; then
+        echo "Usage: wt rm <name...> [project]   (or: wt rm -i [project])" >&2
+        exit 1
+      fi
+      for name in "${names[@]}"; do
+        remove_worktree "$name"
+      done
+    fi
     ;;
 
   *)
-    echo "Usage: wt {new <name> [project] | ls [project] | rm [project]}"
+    echo "Usage:"
+    echo "  wt new <name> [project]"
+    echo "  wt ls [-i] [project]            # default: print names; -i: fzf picker + switch"
+    echo "  wt switch <name> [project]"
+    echo "  wt rm [-i] <name...> [project]  # default: remove named; -i: fzf multi-select"
     echo "  project: openspace (default), osutils"
     ;;
 esac
