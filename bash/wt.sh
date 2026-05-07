@@ -95,6 +95,16 @@ case "${1:-}" in
 
     git -C "$REPO" worktree add "$worktree" || exit 1
 
+    # Copy local build config files (gitignored, required for local dev server)
+    # from the root openspace repo into the new worktree.
+    if [ "$PROJECT_NAME" = "openspace" ]; then
+      src_local="$REPO/web/icedemon/config/local"
+      dst_local="$worktree/web/icedemon/config/local"
+      mkdir -p "$dst_local"
+      cp "$src_local/BuildDev.js" "$dst_local/BuildDev.js"
+      cp "$src_local/BuildProd.js" "$dst_local/BuildProd.js"
+    fi
+
     # Ensure the canonical memory dir exists so the symlinks below aren't
     # dangling on first use for a project.
     mkdir -p "$CANONICAL_MEMORY"
