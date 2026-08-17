@@ -20,6 +20,10 @@ export PATH="$HOME/.yarn/bin:$PATH"
 alias y='yarn'
 alias yd='yarn dev'
 
+# pnpm
+alias p='pnpm'
+alias pl='pnpm dev:lite'
+
 # prompt
 # Set colors for bash using escape sequences
 COLOR_DEF='\[\e[0m\]' # Default color
@@ -109,7 +113,8 @@ alias gst='git stash --include-untracked'
 alias gss='git stash show -p'
 alias ga='git add --all :/'
 alias gc="git add --all && git commit"
-alias gd="git --no-pager diff"
+# alias gd="git --no-pager diff"
+alias gd="git diff"
 alias gb="git branch"
 alias gk="git checkout"
 alias gl="git pull"
@@ -210,8 +215,8 @@ alias lnvm=". $NVM_DIR/nvm.sh"
 # aws auth
 export AWS_PROFILE=os-dev 
 export AWS_REGION=us-west-2
-alias al='aws sso login --profile os-dev'
-alias ai='aws sts get-caller-identity'
+alias ai='aws sts get-caller-identity' # am I logged in?
+alias al='aws sso login --profile os-dev' # login
 
 # https://docs.anthropic.com/en/docs/claude-code/amazon-bedrock
 # Enable Bedrock integration for Claude Code
@@ -395,4 +400,3 @@ export PATH
 #THIS MUST BE AT THE END OF THE FILE FOR SDKMAN TO WORK!!!
 export SDKMAN_DIR="$HOME/.sdkman"
 [[ -s "$HOME/.sdkman/bin/sdkman-init.sh" ]] && source "$HOME/.sdkman/bin/sdkman-init.sh"
-
