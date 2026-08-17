@@ -68,11 +68,28 @@ remove_worktree() {
   local worktree="$HOME/src/${PROJECT_NAME}-$name"
   echo "Removing $name..."
   tmux kill-window -t "$name" 2>/dev/null || true
-  if ! git -C "$REPO" worktree remove "$worktree" --force 2>/dev/null; then
-    rm -rf "$worktree"
-    git -C "$REPO" worktree prune
+
+  # Rename the worktree out of the way (instant same-filesystem rename),
+  # prune git's metadata, then delete the contents asynchronously. The big
+  # cost is unlinking node_modules; doing it in the background returns
+  # control to the user in well under a second.
+  if [ -d "$worktree" ]; then
+    local trash="$HOME/src/.wt-trash-${PROJECT_NAME}-${name}-$$"
+    mv "$worktree" "$trash"
+    ( nohup rm -rf "$trash" >/dev/null 2>&1 & )
   fi
+  git -C "$REPO" worktree prune
+
   echo "  Done"
+}
+
+warn_if_trash_present() {
+  local leftovers
+  leftovers=$(compgen -G "$HOME/src/.wt-trash-*" || true)
+  if [ -n "$leftovers" ]; then
+    echo "Warning: leftover trash dirs from prior wt rm (background delete may have failed):" >&2
+    echo "$leftovers" | sed 's/^/  /' >&2
+  fi
 }
 
 case "${1:-}" in
@@ -185,6 +202,7 @@ case "${1:-}" in
     fi
 
     get_project_config "$project"
+    warn_if_trash_present
 
     if [ "$interactive" -eq 1 ]; then
       worktrees=$(list_worktree_names)
