@@ -2,6 +2,11 @@ import { runCommand } from "./command.ts";
 import { AGENT_STATES } from "./types.ts";
 import type { CcInstanceSnapshot, CommandRunner } from "./types.ts";
 
+type RawCcInstanceSnapshot = Omit<CcInstanceSnapshot, "backgroundTaskCount" | "lastModifiedAt"> & {
+  backgroundTaskCount?: number;
+  lastModifiedAt?: number | null;
+};
+
 const LIST_EXPR = `luaeval("(function() local cc=package.loaded['cc']; if not cc then return '[]' end; if not cc.list_instances then error('cc.nvim agents API unavailable; restart Neovim after updating cc.nvim') end; return vim.json.encode(cc.list_instances()) end)()")`;
 
 function conciseError(value: string, fallback: string): string {
@@ -18,7 +23,7 @@ function nullableNumber(value: unknown): value is number | null {
   return value === null || (typeof value === "number" && Number.isFinite(value));
 }
 
-function isSnapshot(value: unknown): value is CcInstanceSnapshot {
+function isSnapshot(value: unknown): value is RawCcInstanceSnapshot {
   if (!value || typeof value !== "object") return false;
   const v = value as Record<string, unknown>;
   return Number.isInteger(v.outputBufnr) && Number.isInteger(v.promptBufnr)
@@ -26,7 +31,10 @@ function isSnapshot(value: unknown): value is CcInstanceSnapshot {
     && (v.provider === "claude" || v.provider === "codex")
     && nullableString(v.model) && typeof v.cwd === "string"
     && nullableNumber(v.pid) && AGENT_STATES.includes(v.state as never)
-    && nullableNumber(v.turnElapsedMs);
+    && nullableNumber(v.turnElapsedMs)
+    && (v.backgroundTaskCount === undefined
+      || (Number.isSafeInteger(v.backgroundTaskCount) && (v.backgroundTaskCount as number) >= 0))
+    && (v.lastModifiedAt === undefined || nullableNumber(v.lastModifiedAt));
 }
 
 export interface CcQueryResult {
@@ -49,7 +57,15 @@ export async function queryCcInstances(
     if (!Array.isArray(parsed) || !parsed.every(isSnapshot)) {
       return { snapshots: null, error: "cc.nvim returned an invalid instance snapshot" };
     }
-    return { snapshots: parsed };
+    return {
+      snapshots: parsed.map((snapshot) => ({
+        ...snapshot,
+        // Older already-running Neovim processes do not expose these fields.
+        // Keep inventory usable during rolling restarts.
+        backgroundTaskCount: snapshot.backgroundTaskCount ?? 0,
+        lastModifiedAt: snapshot.lastModifiedAt ?? null,
+      })),
+    };
   } catch {
     return { snapshots: null, error: "cc.nvim returned invalid JSON" };
   }

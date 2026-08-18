@@ -60,12 +60,21 @@ function compareNullable(left: string | null, right: string | null): number {
   return lexical(left, right);
 }
 
+function compareNullableNewest(left: number | null, right: number | null): number {
+  if (left === null && right === null) return 0;
+  if (left === null) return 1;
+  if (right === null) return -1;
+  return right - left;
+}
+
 export function createAgentComparator(config: AgentsConfig): (left: Agent, right: Agent) => number {
   const { by, projectOrder, statusOrder } = config.sort;
   return (left, right) => {
     for (const key of by) {
       let compared = 0;
-      if (key === "project") {
+      if (key === "lastModified") {
+        compared = compareNullableNewest(left.lastModifiedAt, right.lastModifiedAt);
+      } else if (key === "project") {
         compared = configuredRank(left.project, projectOrder, true)
           - configuredRank(right.project, projectOrder, true);
         if (compared === 0) compared = lexical(left.project, right.project);

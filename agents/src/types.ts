@@ -2,6 +2,7 @@ export const AGENT_STATES = [
   "waiting",
   "interrupting",
   "working",
+  "monitoring",
   "starting",
   "ready",
   "exited",
@@ -21,6 +22,8 @@ export interface CcInstanceSnapshot {
   pid: number | null;
   state: AgentState;
   turnElapsedMs: number | null;
+  backgroundTaskCount: number;
+  lastModifiedAt: number | null;
 }
 
 export interface TmuxPane {
@@ -53,7 +56,7 @@ export interface Agent extends CcInstanceSnapshot {
   tmuxPaneId: string | null;
 }
 
-export const SORT_KEYS = ["project", "status", "name", "provider", "model", "key"] as const;
+export const SORT_KEYS = ["lastModified", "project", "status", "name", "provider", "model", "key"] as const;
 export type SortKey = (typeof SORT_KEYS)[number];
 
 export interface AgentsConfig {

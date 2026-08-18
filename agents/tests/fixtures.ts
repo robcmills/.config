@@ -20,6 +20,8 @@ export function agent(overrides: Partial<Agent> = {}): Agent {
     pid: 200,
     state: "ready",
     turnElapsedMs: null,
+    backgroundTaskCount: 0,
+    lastModifiedAt: 1_700_000_000_000,
     ...overrides,
   };
 }

@@ -10,7 +10,8 @@ const config: AgentsConfig = {
 const snapshot = (overrides: Partial<CcInstanceSnapshot> = {}): CcInstanceSnapshot => ({
   outputBufnr: 4, promptBufnr: 5, sessionId: "s", name: "n", provider: "claude",
   model: "opus", cwd: `${homedir()}/src/openspace-a/web`, pid: 90,
-  state: "ready", turnElapsedMs: null, ...overrides,
+  state: "ready", turnElapsedMs: null, backgroundTaskCount: 0,
+  lastModifiedAt: 1_700_000_000_000, ...overrides,
 });
 
 test("project labels use the first ~/src component and basename elsewhere", () => {

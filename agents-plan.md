@@ -68,7 +68,8 @@ waiting     gable-ct         codex     gpt-5.6-sol lease-review-landlord
 ### Sort configuration
 
 Sorting must be data-driven rather than embedded in the formatter or picker.
-The default primary key is project, followed by status and session name:
+The default primary key is last modified, followed by project, status, and
+session name:
 
 ```typescript
 // ~/.config/agents/config.ts
@@ -76,7 +77,7 @@ import type { AgentsConfig } from "./src/types";
 
 export default {
   sort: {
-    by: ["project", "status", "name"],
+    by: ["lastModified", "project", "status", "name"],
     projectOrder: [
       "openspace*",
       // Add the remaining project names here in the desired order, for example:
@@ -100,6 +101,9 @@ Rules:
 
 - `sort.by` controls comparator precedence. Reordering it to
   `["status", "project", "name"]`, for example, restores status-first sorting.
+- `lastModified` sorts agents by their latest live conversation activity,
+  newest first. Agents from older Neovim processes that do not expose an
+  activity timestamp sort after timestamped agents until Neovim is restarted.
 - `projectOrder` is checked from top to bottom. Entries are exact project names
   or simple trailing-`*` prefix groups.
 - `openspace*` gives the main `openspace` project and all worktrees such as
@@ -256,6 +260,7 @@ interface CcInstanceSnapshot {
     | "ready"
     | "exited";
   turnElapsedMs: number | null;
+  lastModifiedAt: number | null; // epoch milliseconds
 }
 ```
 

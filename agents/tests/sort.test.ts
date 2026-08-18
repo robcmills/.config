@@ -12,6 +12,20 @@ const config: AgentsConfig = {
 };
 
 describe("configured sorting", () => {
+  test("sorts last modified newest-first and unknown timestamps last", () => {
+    const byModified: AgentsConfig = {
+      ...config,
+      sort: { ...config.sort, by: ["lastModified"] },
+    };
+    const agents = [
+      agent({ key: "1:1", lastModifiedAt: 100 }),
+      agent({ key: "1:2", lastModifiedAt: null }),
+      agent({ key: "1:3", lastModifiedAt: 300 }),
+    ];
+    expect(agents.sort(createAgentComparator(byModified)).map((item) => item.key))
+      .toEqual(["1:3", "1:1", "1:2"]);
+  });
+
   test("groups configured prefixes, then manual projects, then alphabetical fallback", () => {
     const agents = [
       agent({ key: "1:1", project: "z-new" }),
