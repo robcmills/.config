@@ -18,12 +18,13 @@ test("picker rows color only the display and retain a hidden exact key", () => {
 
 test("picker header and values share widths based on the longest value", () => {
   const { header, rows } = formatPickerTable([
-    agent({ model: "gpt-5.6-sol", project: "x" }),
-    agent({ key: "101:8", model: "opus", project: "long-project-name" }),
+    agent({ model: "gpt-5.6-sol", project: "x", lastModifiedAt: 1_700_000_000_123 }),
+    agent({ key: "101:8", model: "opus", project: "long-project-name", lastModifiedAt: null }),
   ]);
   const visibleRow = rows[0]!.replace(/\x1b\[[0-9;]*m/g, "").split("\t")[0]!;
   const headerColumns = [
     header.indexOf("STATE"),
+    header.indexOf("LAST MODIFIED"),
     header.indexOf("PROJECT"),
     header.indexOf("PROVIDER"),
     header.indexOf("MODEL"),
@@ -31,6 +32,7 @@ test("picker header and values share widths based on the longest value", () => {
   ];
   const rowColumns = [
     visibleRow.indexOf("ready"),
+    visibleRow.indexOf("2023-11-14T22:13:20Z"),
     visibleRow.indexOf("x"),
     visibleRow.indexOf("codex"),
     visibleRow.indexOf("gpt-5.6-sol"),
@@ -39,4 +41,5 @@ test("picker header and values share widths based on the longest value", () => {
   expect(rowColumns).toEqual(headerColumns);
   expect(header.slice(header.indexOf("MODEL"), header.indexOf("SESSION")).length)
     .toBeGreaterThan("gpt-5.6-sol".length);
+  expect(rows[1]).toContain("—");
 });

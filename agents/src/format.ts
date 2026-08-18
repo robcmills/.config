@@ -48,6 +48,10 @@ function displayText(value: string | null): string {
   return (value ?? "—").replace(/[\x00-\x1f\x7f]/g, " ");
 }
 
+function formatLastModified(value: number | null): string | null {
+  return value === null ? null : new Date(value).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
 function cell(value: string | null, width: number): string {
   const text = displayText(value);
   return text.length > width ? `${text.slice(0, Math.max(1, width - 1))}…` : text.padEnd(width);
@@ -60,11 +64,17 @@ export interface PickerTable {
 
 export function formatPickerTable(agents: Agent[]): PickerTable {
   const stateWidth = Math.max("STATE".length, ...agents.map((agent) => agent.state.length));
+  const lastModified = agents.map((agent) => formatLastModified(agent.lastModifiedAt));
+  const lastModifiedWidth = Math.max(
+    "LAST MODIFIED".length,
+    ...lastModified.map((value) => (value ?? "—").length),
+  );
   const projectWidth = Math.max("PROJECT".length, ...agents.map((agent) => agent.project.length));
   const providerWidth = Math.max("PROVIDER".length, ...agents.map((agent) => agent.provider.length));
   const modelWidth = Math.max("MODEL".length, ...agents.map((agent) => (agent.model ?? "—").length));
   const header = [
     cell("STATE", stateWidth),
+    cell("LAST MODIFIED", lastModifiedWidth),
     cell("PROJECT", projectWidth),
     cell("PROVIDER", providerWidth),
     cell("MODEL", modelWidth),
@@ -74,6 +84,7 @@ export function formatPickerTable(agents: Agent[]): PickerTable {
     const state = `${COLORS[agent.state]}${cell(agent.state, stateWidth)}${RESET}`;
     const display = [
       state,
+      cell(formatLastModified(agent.lastModifiedAt), lastModifiedWidth),
       cell(agent.project, projectWidth),
       cell(agent.provider, providerWidth),
       cell(agent.model, modelWidth),

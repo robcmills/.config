@@ -59,10 +59,10 @@ The interactive rows should initially contain only the information needed to
 choose an agent:
 
 ```text
-STATE       PROJECT          PROVIDER  MODEL        SESSION
-ready       openspace        claude    opus-5      test-feature-permissions
-working     openspace-aikido codex     gpt-5.6-sol refactor-alert-routing
-waiting     gable-ct         codex     gpt-5.6-sol lease-review-landlord
+STATE       LAST MODIFIED         PROJECT          PROVIDER  MODEL        SESSION
+ready       2026-08-18T21:42:05Z  openspace        claude    opus-5      test-feature-permissions
+working     2026-08-18T21:38:12Z  openspace-aikido codex     gpt-5.6-sol refactor-alert-routing
+waiting     2026-08-18T21:31:47Z  gable-ct         codex     gpt-5.6-sol lease-review-landlord
 ```
 
 ### Sort configuration
