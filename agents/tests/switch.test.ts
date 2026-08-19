@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { focusAndSwitch, switchTmux } from "../src/switch.ts";
+import { focusAndSwitch, notifyTmux, switchTmux, warningNotification } from "../src/switch.ts";
 import type { CommandRunner } from "../src/types.ts";
 import { agent } from "./fixtures.ts";
 
@@ -29,6 +29,35 @@ describe("tmux switching", () => {
       ["tmux", "select-pane", "-t", "%3"],
     ]);
   });
+
+  test("shows a durable tmux notification without leaking command output", async () => {
+    process.env.TMUX = "/tmp/tmux";
+    const calls: Array<{ args: string[]; timeout?: number }> = [];
+    const run: CommandRunner = async (args, timeout) => {
+      calls.push({ args, timeout });
+      return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+    };
+    expect(await notifyTmux("agents: warning", 8_000, run)).toBe(true);
+    expect(calls).toEqual([{
+      args: ["tmux", "display-message", "-d", "8000", "agents: warning"],
+      timeout: 1_500,
+    }]);
+  });
+
+  test("skips tmux notification outside tmux", async () => {
+    delete process.env.TMUX;
+    let called = false;
+    expect(await notifyTmux("agents: warning", 8_000, async () => {
+      called = true;
+      return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+    })).toBe(false);
+    expect(called).toBe(false);
+  });
+});
+
+test("warning notifications distinguish successful switches from empty inventory", () => {
+  expect(warningNotification(1)).toBe("agents: switched successfully · 1 warning · run 'agents doctor'");
+  expect(warningNotification(3, false)).toBe("agents: no switchable agents · 3 warnings · run 'agents doctor'");
 });
 
 test("focus happens before tmux and partial success is explicit", async () => {

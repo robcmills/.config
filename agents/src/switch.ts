@@ -30,6 +30,28 @@ export interface SwitchDependencies {
   switchTmux?: typeof switchTmux;
 }
 
+export async function notifyTmux(
+  message: string,
+  durationMs = 8_000,
+  run: CommandRunner = runCommand,
+): Promise<boolean> {
+  if (!process.env.TMUX) return false;
+  const result = await run([
+    "tmux",
+    "display-message",
+    "-d",
+    String(durationMs),
+    message,
+  ], 1_500);
+  return result.exitCode === 0 && !result.timedOut;
+}
+
+export function warningNotification(warningCount: number, switched = true): string {
+  const noun = warningCount === 1 ? "warning" : "warnings";
+  const prefix = switched ? "agents: switched successfully" : "agents: no switchable agents";
+  return `${prefix} · ${warningCount} ${noun} · run 'agents doctor'`;
+}
+
 export async function focusAndSwitch(
   agent: Agent,
   dependencies: SwitchDependencies = {},
