@@ -33,7 +33,6 @@ test("picker header and values share widths based on the longest value", () => {
     header.indexOf("STATE"),
     header.indexOf("LAST MODIFIED"),
     header.indexOf("PROJECT"),
-    header.indexOf("PROVIDER"),
     header.indexOf("MODEL"),
     header.indexOf("SESSION"),
   ];
@@ -41,11 +40,12 @@ test("picker header and values share widths based on the longest value", () => {
     visibleRow.indexOf("ready"),
     visibleRow.indexOf("2023-11-14T22:13:20Z"),
     visibleRow.indexOf("x"),
-    visibleRow.indexOf("codex"),
     visibleRow.indexOf("gpt-5.6-sol"),
     visibleRow.indexOf("session-name"),
   ];
   expect(rowColumns).toEqual(headerColumns);
+  expect(header).not.toContain("PROVIDER");
+  expect(visibleRow).not.toContain("codex");
   expect(header.slice(header.indexOf("MODEL"), header.indexOf("SESSION")).length)
     .toBeGreaterThan("gpt-5.6-sol".length);
   expect(rows[1]).toContain("—");

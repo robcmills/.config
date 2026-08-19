@@ -70,13 +70,11 @@ export function formatPickerTable(agents: Agent[]): PickerTable {
     ...lastModified.map((value) => (value ?? "—").length),
   );
   const projectWidth = Math.max("PROJECT".length, ...agents.map((agent) => agent.project.length));
-  const providerWidth = Math.max("PROVIDER".length, ...agents.map((agent) => agent.provider.length));
   const modelWidth = Math.max("MODEL".length, ...agents.map((agent) => (agent.model ?? "—").length));
   const header = [
     cell("STATE", stateWidth),
     cell("LAST MODIFIED", lastModifiedWidth),
     cell("PROJECT", projectWidth),
-    cell("PROVIDER", providerWidth),
     cell("MODEL", modelWidth),
     "SESSION",
   ].join("  ");
@@ -86,7 +84,6 @@ export function formatPickerTable(agents: Agent[]): PickerTable {
       state,
       cell(formatLastModified(agent.lastModifiedAt), lastModifiedWidth),
       cell(agent.project, projectWidth),
-      cell(agent.provider, providerWidth),
       cell(agent.model, modelWidth),
       displayText(agent.name ?? agent.sessionId),
     ].join("  ");
