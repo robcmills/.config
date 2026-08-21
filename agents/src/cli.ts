@@ -2,7 +2,7 @@ import { formatTsv } from "./format.ts";
 import { buildInventory } from "./inventory.ts";
 import { pickAgent } from "./picker.ts";
 import { validateConfig } from "./sort.ts";
-import { focusAndSwitch, notifyTmux, warningNotification } from "./switch.ts";
+import { emptyInventoryWarningNotification, focusAndSwitch, notifyTmux } from "./switch.ts";
 import type { InventoryResult } from "./types.ts";
 
 const HELP = `Usage:
@@ -90,7 +90,7 @@ async function run(args: string[]): Promise<number> {
     const result = await inventory(false);
     if (result.agents.length === 0) {
       if (result.warnings.length > 0) {
-        await notifyTmux(warningNotification(result.warnings.length, false));
+        await notifyTmux(emptyInventoryWarningNotification(result.warnings.length));
       } else {
         await notifyTmux("agents: no running cc.nvim agents");
       }
@@ -103,9 +103,6 @@ async function run(args: string[]): Promise<number> {
     // focus_instance verifies that the selected agent still exists, so a
     // second full inventory would only duplicate discovery and RPC work.
     await focusAndSwitch(agent);
-    if (result.warnings.length > 0) {
-      await notifyTmux(warningNotification(result.warnings.length));
-    }
     return 0;
   }
   if (args.length === 2 && args[0] === "switch") {

@@ -46,10 +46,9 @@ export async function notifyTmux(
   return result.exitCode === 0 && !result.timedOut;
 }
 
-export function warningNotification(warningCount: number, switched = true): string {
+export function emptyInventoryWarningNotification(warningCount: number): string {
   const noun = warningCount === 1 ? "warning" : "warnings";
-  const prefix = switched ? "agents: switched successfully" : "agents: no switchable agents";
-  return `${prefix} · ${warningCount} ${noun} · run 'agents doctor'`;
+  return `agents: no switchable agents · ${warningCount} ${noun} · run 'agents doctor'`;
 }
 
 export async function focusAndSwitch(

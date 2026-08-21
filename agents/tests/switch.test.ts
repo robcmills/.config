@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { focusAndSwitch, notifyTmux, switchTmux, warningNotification } from "../src/switch.ts";
+import {
+  emptyInventoryWarningNotification,
+  focusAndSwitch,
+  notifyTmux,
+  switchTmux,
+} from "../src/switch.ts";
 import type { CommandRunner } from "../src/types.ts";
 import { agent } from "./fixtures.ts";
 
@@ -55,9 +60,10 @@ describe("tmux switching", () => {
   });
 });
 
-test("warning notifications distinguish successful switches from empty inventory", () => {
-  expect(warningNotification(1)).toBe("agents: switched successfully · 1 warning · run 'agents doctor'");
-  expect(warningNotification(3, false)).toBe("agents: no switchable agents · 3 warnings · run 'agents doctor'");
+test("empty inventory warnings include the diagnostic command", () => {
+  expect(emptyInventoryWarningNotification(3)).toBe(
+    "agents: no switchable agents · 3 warnings · run 'agents doctor'",
+  );
 });
 
 test("focus happens before tmux and partial success is explicit", async () => {
