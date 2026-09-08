@@ -48,6 +48,9 @@ function displayText(value: string | null): string {
   return (value ?? "—").replace(/[\x00-\x1f\x7f]/g, " ");
 }
 
+// ▼ marks the primary sort column (newest first).
+const LAST_MODIFIED_HEADER = "LAST MODIFIED ▼";
+
 function formatLastModified(value: number | null): string | null {
   return value === null ? null : new Date(value).toISOString().replace(/\.\d{3}Z$/, "Z");
 }
@@ -66,14 +69,14 @@ export function formatPickerTable(agents: Agent[]): PickerTable {
   const stateWidth = Math.max("STATE".length, ...agents.map((agent) => agent.state.length));
   const lastModified = agents.map((agent) => formatLastModified(agent.lastModifiedAt));
   const lastModifiedWidth = Math.max(
-    "LAST MODIFIED".length,
+    LAST_MODIFIED_HEADER.length,
     ...lastModified.map((value) => (value ?? "—").length),
   );
   const projectWidth = Math.max("PROJECT".length, ...agents.map((agent) => agent.project.length));
   const modelWidth = Math.max("MODEL".length, ...agents.map((agent) => (agent.model ?? "—").length));
   const header = [
     cell("STATE", stateWidth),
-    cell("LAST MODIFIED", lastModifiedWidth),
+    cell(LAST_MODIFIED_HEADER, lastModifiedWidth),
     cell("PROJECT", projectWidth),
     cell("MODEL", modelWidth),
     "SESSION",
