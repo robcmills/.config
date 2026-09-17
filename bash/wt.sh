@@ -83,13 +83,19 @@ remove_worktree() {
   echo "  Done"
 }
 
-warn_if_trash_present() {
-  local leftovers
-  leftovers=$(compgen -G "$HOME/src/.wt-trash-*" || true)
-  if [ -n "$leftovers" ]; then
-    echo "Warning: leftover trash dirs from prior wt rm (background delete may have failed):" >&2
-    echo "$leftovers" | sed 's/^/  /' >&2
-  fi
+# Trash dirs from a prior wt rm are expected to linger for a few minutes
+# while their background rm runs (node_modules is slow to unlink). Only treat
+# a dir as orphaned when no rm is working on it, and relaunch the delete.
+reap_orphaned_trash() {
+  local dir
+  for dir in "$HOME"/src/.wt-trash-*; do
+    [ -d "$dir" ] || continue
+    if pgrep -f "rm -rf $dir" >/dev/null 2>&1; then
+      continue
+    fi
+    echo "Relaunching delete of orphaned trash dir: $dir" >&2
+    ( nohup rm -rf "$dir" >/dev/null 2>&1 & )
+  done
 }
 
 case "${1:-}" in
@@ -202,7 +208,7 @@ case "${1:-}" in
     fi
 
     get_project_config "$project"
-    warn_if_trash_present
+    reap_orphaned_trash
 
     if [ "$interactive" -eq 1 ]; then
       worktrees=$(list_worktree_names)
