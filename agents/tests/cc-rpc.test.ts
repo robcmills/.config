@@ -12,6 +12,17 @@ test("cc inventory parses a valid snapshot", async () => {
   expect(snapshot?.backgroundTaskCount).toBe(2);
 });
 
+test("cc inventory accepts an unread snapshot", async () => {
+  const run: CommandRunner = async () => ({
+    stdout: JSON.stringify([{ outputBufnr: 1, promptBufnr: 2, sessionId: null, name: null, provider: "codex", model: null, cwd: "/x", pid: 3, state: "unread", turnElapsedMs: null, backgroundTaskCount: 0, lastModifiedAt: 1_700_000_000_000 }]),
+    stderr: "", exitCode: 0, timedOut: false,
+  });
+  const result = await queryCcInstances("/socket", 100, run);
+  expect(result.error).toBeUndefined();
+  expect(result.snapshots).toHaveLength(1);
+  expect(result.snapshots?.[0]?.state).toBe("unread");
+});
+
 test("cc inventory tolerates pre-lastModified snapshots during rolling restarts", async () => {
   const run: CommandRunner = async () => ({
     stdout: JSON.stringify([{ outputBufnr: 1, promptBufnr: 2, sessionId: null, name: null, provider: "codex", model: null, cwd: "/x", pid: 3, state: "starting", turnElapsedMs: null }]),

@@ -89,7 +89,9 @@ export default {
     statusOrder: [
       "waiting",
       "interrupting",
+      "unread",
       "working",
+      "monitoring",
       "starting",
       "ready",
     ],
@@ -256,6 +258,8 @@ interface CcInstanceSnapshot {
     | "waiting"
     | "interrupting"
     | "working"
+    | "monitoring"
+    | "unread"
     | "starting"
     | "ready"
     | "exited";
@@ -277,8 +281,10 @@ State precedence:
 2. awaiting a permission/user response -> `waiting`
 3. interrupt pending -> `interrupting`
 4. turn active -> `working`
-5. no session ID yet -> `starting`
-6. otherwise -> `ready`
+5. background tasks active -> `monitoring`
+6. turn finished, output not yet viewed -> `unread`
+7. no session ID yet -> `starting`
+8. otherwise (idle and seen) -> `ready`
 
 Normalize the existing provider-specific interactive state so both Claude and
 Codex set and clear an instance-level `awaiting_input` flag around permission

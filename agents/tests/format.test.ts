@@ -17,6 +17,11 @@ test("picker rows color only the display and retain a hidden exact key", () => {
   expect(output.endsWith("\t100:7")).toBe(true);
 });
 
+test("picker rows show unread in bold green", () => {
+  const output = formatPickerRows([agent({ state: "unread" })])[0]!;
+  expect(output).toMatch(/\x1b\[32;1munread\s*\x1b\[0m/);
+});
+
 test("picker warnings are summarized without transient diagnostic details", () => {
   expect(pickerWarningSummary(0)).toBeNull();
   expect(pickerWarningSummary(1)).toBe("⚠ 1 inventory warning · details: agents doctor");
@@ -45,6 +50,7 @@ test("picker header and values share widths based on the longest value", () => {
   ];
   expect(rowColumns).toEqual(headerColumns);
   expect(header).not.toContain("PROVIDER");
+  expect(header).toContain("LAST MODIFIED ▼");
   expect(visibleRow).not.toContain("codex");
   expect(header.slice(header.indexOf("MODEL"), header.indexOf("SESSION")).length)
     .toBeGreaterThan("gpt-5.6-sol".length);

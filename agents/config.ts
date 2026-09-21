@@ -14,6 +14,7 @@ export default {
     statusOrder: [
       "waiting",
       "interrupting",
+      "unread",
       "working",
       "monitoring",
       "starting",

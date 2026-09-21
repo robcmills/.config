@@ -1,6 +1,7 @@
 export const AGENT_STATES = [
   "waiting",
   "interrupting",
+  "unread",
   "working",
   "monitoring",
   "starting",

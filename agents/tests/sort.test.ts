@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import defaultConfig from "../config.ts";
 import { createAgentComparator, validateConfig } from "../src/sort.ts";
 import type { AgentsConfig, SortKey } from "../src/types.ts";
 import { agent } from "./fixtures.ts";
@@ -12,6 +13,23 @@ const config: AgentsConfig = {
 };
 
 describe("configured sorting", () => {
+  test("default status order puts unread after waiting and interrupting but before working and ready", () => {
+    const byStatus: AgentsConfig = {
+      ...defaultConfig,
+      sort: { ...defaultConfig.sort, by: ["status"] },
+    };
+    const agents = [
+      agent({ key: "1:1", state: "ready" }),
+      agent({ key: "1:2", state: "working" }),
+      agent({ key: "1:3", state: "unread" }),
+      agent({ key: "1:4", state: "interrupting" }),
+      agent({ key: "1:5", state: "waiting" }),
+    ];
+    expect(agents.sort(createAgentComparator(byStatus)).map((item) => item.state)).toEqual([
+      "waiting", "interrupting", "unread", "working", "ready",
+    ]);
+  });
+
   test("sorts last modified newest-first and unknown timestamps last", () => {
     const byModified: AgentsConfig = {
       ...config,
