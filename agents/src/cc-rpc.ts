@@ -102,7 +102,16 @@ const API_UNAVAILABLE = "cc.nvim agents API unavailable; update cc.nvim and rest
 
 // Lua snippets are embedded in a Vimscript double-quoted string, so they must
 // not contain `"` or `\`. luaCallExpression asserts this.
-const OPEN_LUA = `(function(a) local o = vim.json.decode(a); local cc = require('cc'); if type(cc.open) ~= 'function' then return vim.json.encode({err='${API_UNAVAILABLE}'}) end; local ok, bufnr, err = pcall(cc.open, o); if not ok then return vim.json.encode({err=tostring(bufnr)}) end; if type(bufnr) ~= 'number' then return vim.json.encode({err=tostring(err or 'cc.open returned no buffer; update cc.nvim and restart Neovim')}) end; return vim.json.encode({bufnr=bufnr, pid=vim.fn.getpid()}) end)(_A)`;
+
+// A Neovim that loaded cc.nvim before the agents API landed still has an
+// `open` function, but it returns nothing, so probing `open` alone creates an
+// instance we can never address. Probe the whole API first and refuse before
+// anything is created: send_prompt and get_last_assistant_message must be
+// functions, and close must accept a target buffer (the same check CLOSE_LUA
+// makes).
+const API_PROBE_LUA = `type(cc.open) == 'function' and type(cc.send_prompt) == 'function' and type(cc.get_last_assistant_message) == 'function' and type(cc.close) == 'function' and debug.getinfo(cc.close, 'u').nparams >= 1`;
+
+const OPEN_LUA = `(function(a) local o = vim.json.decode(a); local cc = require('cc'); if not (${API_PROBE_LUA}) then return vim.json.encode({err='${API_UNAVAILABLE}'}) end; local ok, bufnr, err = pcall(cc.open, o); if not ok then return vim.json.encode({err=tostring(bufnr)}) end; if type(bufnr) ~= 'number' then return vim.json.encode({err=tostring(err or 'cc.open returned no buffer; update cc.nvim and restart Neovim')}) end; return vim.json.encode({bufnr=bufnr, pid=vim.fn.getpid()}) end)(_A)`;
 
 const SEND_LUA = `(function(a) local o = vim.json.decode(a); local cc = require('cc'); if type(cc.send_prompt) ~= 'function' then return vim.json.encode({err='${API_UNAVAILABLE}'}) end; local ok, res, err = pcall(cc.send_prompt, o.bufnr, o.text); if not ok then return vim.json.encode({err=tostring(res)}) end; if not res then return vim.json.encode({err=tostring(err or 'cc.send_prompt failed')}) end; return vim.json.encode({ok=true}) end)(_A)`;
 
