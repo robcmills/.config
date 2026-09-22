@@ -14,7 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 usage() {
   cat <<'EOF'
 Usage:
-  wt new name=<n> repo=<path> [subdir=<s>] [window=<w>] [--json]
+  wt new name=<n> repo=<path> [subdir=<s>] [window=<w>] [focus=true|false] [--json]
   wt ls [repo=<path>] [-i]            # print names; -i: fzf picker + switch
   wt switch name=<n> [repo=<path>]
   wt rm name=<n>... [repo=<path>]
@@ -23,6 +23,8 @@ Usage:
 
 repo= defaults to the main repo of the current directory.
 Worktrees land at ~/src/<repo-basename>-<name>.
+focus= selects the new tmux window. Defaults to true at an interactive
+terminal and false otherwise, so agents never pull the user off their window.
 EOF
 }
 
@@ -38,6 +40,7 @@ REPO_ARG=""
 SUBDIR=""
 SUBDIR_GIVEN=0
 WINDOW=""
+FOCUS=""
 JSON=0
 INTERACTIVE=0
 
@@ -49,6 +52,12 @@ parse_args() {
       repo=*) REPO_ARG="${arg#repo=}" ;;
       subdir=*) SUBDIR="${arg#subdir=}"; SUBDIR_GIVEN=1 ;;
       window=*) WINDOW="${arg#window=}" ;;
+      focus=*)
+        case "${arg#focus=}" in
+          true|1|yes) FOCUS=1 ;;
+          false|0|no) FOCUS=0 ;;
+          *) die "focus= expects true or false" ;;
+        esac ;;
       --json) JSON=1 ;;
       -i) INTERACTIVE=1 ;;
       *) usage >&2; die "unknown argument '$arg'" ;;
@@ -225,9 +234,17 @@ cmd_new() {
     dir="$worktree"
   fi
 
+  # Switching the user's tmux client to the new window is only welcome when a
+  # human ran this at a terminal. Agent-spawned shells have no TTY on stdin.
+  if [ -z "$FOCUS" ]; then
+    if [ -t 0 ]; then FOCUS=1; else FOCUS=0; fi
+  fi
+  local -a detach=()
+  [ "$FOCUS" -eq 1 ] || detach=(-d)
+
   local window_name="${WINDOW:-$name}"
   local window_id=""
-  if window_id="$(tmux new-window -P -F '#{window_id}' -n "$window_name" -c "$dir" 2>/dev/null)"; then
+  if window_id="$(tmux new-window ${detach[@]+"${detach[@]}"} -P -F '#{window_id}' -n "$window_name" -c "$dir" 2>/dev/null)"; then
     tmux send-keys -t "$window_id" nvim Space . Enter
   else
     window_id=""
