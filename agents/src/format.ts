@@ -36,7 +36,7 @@ export function formatTsv(agents: Agent[]): string {
 const COLORS: Record<Agent["state"], string> = {
   waiting: "\x1b[33;1m",
   interrupting: "\x1b[31m",
-  unread: "\x1b[32;1m",
+  unread: "\x1b[38;5;208;1m",
   working: "\x1b[36m",
   monitoring: "\x1b[34;1m",
   starting: "\x1b[35m",

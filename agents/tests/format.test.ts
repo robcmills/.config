@@ -17,9 +17,9 @@ test("picker rows color only the display and retain a hidden exact key", () => {
   expect(output.endsWith("\t100:7")).toBe(true);
 });
 
-test("picker rows show unread in bold green", () => {
+test("picker rows show unread in bold orange", () => {
   const output = formatPickerRows([agent({ state: "unread" })])[0]!;
-  expect(output).toMatch(/\x1b\[32;1munread\s*\x1b\[0m/);
+  expect(output).toMatch(/\x1b\[38;5;208;1munread\s*\x1b\[0m/);
 });
 
 test("picker warnings are summarized without transient diagnostic details", () => {
