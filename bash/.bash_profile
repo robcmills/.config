@@ -15,6 +15,9 @@ export PATH=~/.local/bin:$PATH
 # homebrew
 export PATH=/opt/homebrew/bin:$PATH
 
+# neovim: versioned official builds; switch with ln -sfn <version> ~/.local/nvim/current
+export PATH=$HOME/.local/nvim/current/bin:$PATH
+
 # yarn
 export PATH="$HOME/.yarn/bin:$PATH"
 alias y='yarn'
