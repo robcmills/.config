@@ -185,6 +185,11 @@ if [[ -n "$pane_id" ]]; then
     else
       nvim_pid=$(pgrep -P "$pane_pid" nvim 2>/dev/null | head -1 || true)
     fi
+    # The server socket is named after the TUI's --embed child, not the TUI.
+    if [[ -n "$nvim_pid" ]]; then
+      embed_pid=$(pgrep -P "$nvim_pid" nvim 2>/dev/null | head -1 || true)
+      [[ -n "$embed_pid" ]] && nvim_pid=$embed_pid
+    fi
     if [[ -n "$nvim_pid" ]]; then
       socket=$(ls "${TMPDIR%/}/nvim.$USER/"*/"nvim.$nvim_pid.0" 2>/dev/null | head -1 || true)
       if [[ -n "$socket" ]]; then
