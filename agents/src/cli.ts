@@ -4,7 +4,7 @@ import type { NamedArgs } from "./args.ts";
 import { closeAgent, interruptAgent, KEY_PATTERN, newAgent, sendToAgent, tailAgent } from "./control.ts";
 import { formatTsv } from "./format.ts";
 import { buildInventory } from "./inventory.ts";
-import { pickAgent } from "./picker.ts";
+import { formatPickerLines, pickAgent, PICKER_ROWS_FLAG } from "./picker.ts";
 import { validateConfig } from "./sort.ts";
 import { emptyInventoryWarningNotification, focusAndSwitch, notifyTmux } from "./switch.ts";
 import type { InventoryResult } from "./types.ts";
@@ -104,6 +104,11 @@ async function run(args: string[]): Promise<number> {
       const output = formatTsv(result.agents);
       if (output) console.log(output);
     }
+    return 0;
+  }
+  // Internal: the picker's periodic fzf reload.
+  if (args.length === 1 && args[0] === PICKER_ROWS_FLAG) {
+    process.stdout.write(formatPickerLines((await inventory(false)).agents));
     return 0;
   }
   if (args.length === 1 && args[0] === "-i") {
