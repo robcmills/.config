@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parseBoolean, parseNamedArgs, parsePositiveInteger, requireArg } from "./args.ts";
 import type { NamedArgs } from "./args.ts";
-import { closeAgent, KEY_PATTERN, newAgent, sendToAgent, tailAgent } from "./control.ts";
+import { closeAgent, interruptAgent, KEY_PATTERN, newAgent, sendToAgent, tailAgent } from "./control.ts";
 import { formatTsv } from "./format.ts";
 import { buildInventory } from "./inventory.ts";
 import { pickAgent } from "./picker.ts";
@@ -28,6 +28,9 @@ const HELP = `Usage:
                          Queue a prompt; refuses while the agent is mid-turn
   agents tail key=<k> [n=<lines>]
                          Print the agent's last assistant message
+  agents interrupt key=<k>
+                         Interrupt the agent's current turn, like <C-c>; the
+                         process stays alive. Exits 1 if nothing was interrupted
   agents close key=<k>   Close the agent
 
 Keys are <nvim-pid>:<output-bufnr>, as printed by \`agents\`.`;
@@ -142,6 +145,7 @@ async function run(args: string[]): Promise<number> {
   if (args[0] === "new") return runNew(args.slice(1));
   if (args[0] === "send") return runSend(args.slice(1));
   if (args[0] === "tail") return runTail(args.slice(1));
+  if (args[0] === "interrupt") return runInterrupt(args.slice(1));
   if (args[0] === "close") return runClose(args.slice(1));
   stderr("invalid arguments\n" + HELP);
   return 2;
@@ -211,6 +215,15 @@ async function runTail(args: string[]): Promise<number> {
   if (!validKey(key)) return 2;
   const text = await tailAgent(key, parsePositiveInteger(parsed.values.get("n"), "n"), controlDependencies);
   console.log(text);
+  return 0;
+}
+
+async function runInterrupt(args: string[]): Promise<number> {
+  const parsed = parseNamedArgs(args, { keys: ["key"] });
+  const key = requireArg(parsed, "key");
+  if (!validKey(key)) return 2;
+  await interruptAgent(key, controlDependencies);
+  console.log(`interrupt sent to ${key}`);
   return 0;
 }
 

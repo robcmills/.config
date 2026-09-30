@@ -6,6 +6,7 @@ import {
   AgentBusyError,
   AgentNotFoundError,
   closeAgent,
+  interruptAgent,
   lastLines,
   newAgent,
   sendToAgent,
@@ -109,5 +110,23 @@ describe("close", () => {
       close: async (socketPath, bufnr) => { calls.push([socketPath, bufnr]); return { ok: true }; },
     });
     expect(calls).toEqual([["/tmp/nvim.100.0", 7]]);
+  });
+});
+
+describe("interrupt", () => {
+  test("interrupts the resolved buffer", async () => {
+    const calls: unknown[] = [];
+    await interruptAgent("100:7", {
+      inventory: inventoryWith("working"),
+      interrupt: async (socketPath, bufnr) => { calls.push([socketPath, bufnr]); return { ok: true }; },
+    });
+    expect(calls).toEqual([["/tmp/nvim.100.0", 7]]);
+  });
+
+  test("throws with the reason when nothing was interrupted", async () => {
+    await expect(interruptAgent("100:7", {
+      inventory: inventoryWith("ready"),
+      interrupt: async () => ({ ok: false, error: "no turn active" }),
+    })).rejects.toThrow("nothing interrupted for 100:7: no turn active");
   });
 });

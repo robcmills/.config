@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   closeCcInstance,
   getCcLastAssistantMessage,
+  interruptCcInstance,
   luaCallExpression,
   openCcInstance,
   sendCcPrompt,
@@ -109,5 +110,26 @@ describe("close", () => {
   test("refuses an old close() that ignores its argument", async () => {
     const { run } = recorder({ stdout: JSON.stringify({ err: "cc.nvim agents API unavailable; update cc.nvim and restart Neovim" }) });
     expect((await closeCcInstance("/sock", 7, 100, run)).error).toContain("API unavailable");
+  });
+});
+
+describe("stop", () => {
+  test("targets the given buffer and checks the API accepts a target", async () => {
+    const { calls, run } = recorder({ stdout: JSON.stringify({ ok: true }) });
+    expect(await interruptCcInstance("/sock", 7, 100, run)).toEqual({ ok: true });
+    expect(argumentJson(calls[0]![4]!)).toEqual({ bufnr: 7 });
+    expect(calls[0]![4]).toContain("cc.stop");
+    expect(calls[0]![4]).toContain("nparams < 1");
+  });
+
+  test("reports why nothing was interrupted", async () => {
+    const { run } = recorder({ stdout: JSON.stringify({ err: "no turn active" }) });
+    expect(await interruptCcInstance("/sock", 7, 100, run)).toEqual({ ok: false, error: "no turn active" });
+  });
+
+  test("validates the buffer locally before any RPC", async () => {
+    const { calls, run } = recorder({ stdout: JSON.stringify({ ok: true }) });
+    expect((await interruptCcInstance("/sock", -1, 100, run)).ok).toBe(false);
+    expect(calls).toHaveLength(0);
   });
 });

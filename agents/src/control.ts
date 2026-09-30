@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import {
   closeCcInstance,
   getCcLastAssistantMessage,
+  interruptCcInstance,
   openCcInstance,
   sendCcPrompt,
 } from "./cc-rpc.ts";
@@ -20,6 +21,7 @@ export interface ControlDependencies {
   send?: typeof sendCcPrompt;
   lastMessage?: typeof getCcLastAssistantMessage;
   close?: typeof closeCcInstance;
+  interrupt?: typeof interruptCcInstance;
 }
 
 export interface NewAgentOptions extends Omit<CcOpenOptions, "cwd"> {
@@ -97,6 +99,13 @@ export async function tailAgent(
   const result = await (dependencies.lastMessage ?? getCcLastAssistantMessage)(agent.socketPath, agent.outputBufnr);
   if (result.text === null) throw new Error(result.error || "cc.nvim get_last_assistant_message failed");
   return lastLines(result.text, n);
+}
+
+export async function interruptAgent(key: string, dependencies: ControlDependencies): Promise<Agent> {
+  const agent = await findAgent(key, dependencies);
+  const result = await (dependencies.interrupt ?? interruptCcInstance)(agent.socketPath, agent.outputBufnr);
+  if (!result.ok) throw new Error(`nothing interrupted for ${key}: ${result.error || "cc.nvim stop failed"}`);
+  return agent;
 }
 
 export async function closeAgent(key: string, dependencies: ControlDependencies): Promise<Agent> {

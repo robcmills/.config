@@ -91,7 +91,7 @@ export async function focusCcInstance(
 }
 
 // ---------------------------------------------------------------------------
-// Control RPCs: open, send_prompt, get_last_assistant_message, close.
+// Control RPCs: open, send_prompt, get_last_assistant_message, stop, close.
 //
 // Arguments travel as a JSON document in luaeval's `_A` and are decoded with
 // vim.json.decode on the Neovim side, so prompt text never touches Lua source.
@@ -120,6 +120,10 @@ const TAIL_LUA = `(function(a) local o = vim.json.decode(a); local cc = require(
 // Older cc.nvim exposes close() with no parameters and acts on the current
 // instance; calling it from here would close whatever the user is looking at.
 const CLOSE_LUA = `(function(a) local o = vim.json.decode(a); local cc = require('cc'); local info = type(cc.close) == 'function' and debug.getinfo(cc.close, 'u') or nil; if not info or info.nparams < 1 then return vim.json.encode({err='${API_UNAVAILABLE}'}) end; local ok, res, err = pcall(cc.close, o.bufnr); if not ok then return vim.json.encode({err=tostring(res)}) end; if res == false then return vim.json.encode({err=tostring(err or 'cc.close failed')}) end; return vim.json.encode({ok=true}) end)(_A)`;
+
+// Older cc.nvim exposes stop() with no parameters and interrupts the current
+// instance, the same hazard as close(). The new stop(bufnr) returns ok, err.
+const STOP_LUA = `(function(a) local o = vim.json.decode(a); local cc = require('cc'); local info = type(cc.stop) == 'function' and debug.getinfo(cc.stop, 'u') or nil; if not info or info.nparams < 1 then return vim.json.encode({err='${API_UNAVAILABLE}'}) end; local ok, res, err = pcall(cc.stop, o.bufnr); if not ok then return vim.json.encode({err=tostring(res)}) end; if res ~= true then return vim.json.encode({err=tostring(err or 'cc.stop failed')}) end; return vim.json.encode({ok=true}) end)(_A)`;
 
 /**
  * Build a `--remote-expr` expression that evaluates `lua` with `_A` bound to
@@ -244,6 +248,19 @@ export async function closeCcInstance(
   if (!validBufnr(outputBufnr)) return { ok: false, error: "invalid output buffer number" };
   const { value, error } = await callCc(
     socketPath, CLOSE_LUA, { bufnr: outputBufnr }, timeoutMs, run, "close",
+  );
+  return value ? { ok: true } : { ok: false, error };
+}
+
+export async function interruptCcInstance(
+  socketPath: string,
+  outputBufnr: number,
+  timeoutMs = 3_000,
+  run: CommandRunner = runCommand,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!validBufnr(outputBufnr)) return { ok: false, error: "invalid output buffer number" };
+  const { value, error } = await callCc(
+    socketPath, STOP_LUA, { bufnr: outputBufnr }, timeoutMs, run, "stop",
   );
   return value ? { ok: true } : { ok: false, error };
 }
