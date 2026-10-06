@@ -244,7 +244,8 @@ async function callCc(
 // Delegation RPCs. The parent's cc.nvim owns the link (cc.delegation); the
 // child's Neovim only runs a forwarder that `agents` installs, so a child on
 // any cc.nvim with CcStateChanged is tracked.
-const RECEIVER_UNAVAILABLE = "the parent's cc.nvim has no delegation receiver; update cc.nvim and restart Neovim";
+// Embedded in single-quoted Lua strings: no apostrophes.
+const RECEIVER_UNAVAILABLE = "the parent cc.nvim has no delegation receiver; update cc.nvim and restart Neovim";
 
 const REGISTER_LUA = `(function(a) local o = vim.json.decode(a); local okm, D = pcall(require, 'cc.delegation'); if not okm or type(D.register_bufnr) ~= 'function' then return vim.json.encode({err='${RECEIVER_UNAVAILABLE}'}) end; local ok, res, err = pcall(D.register_bufnr, o.bufnr, o.child); if not ok then return vim.json.encode({err=tostring(res)}) end; if not res then return vim.json.encode({err=tostring(err or 'register failed')}) end; return vim.json.encode({ok=true}) end)(_A)`;
 

@@ -127,8 +127,8 @@ describe("linkChild", () => {
   });
 
   test("a parent without the receiver or a child without CcStateChanged is a warning", async () => {
-    const noReceiver = await linkChild(p, c, { register: async () => ({ ok: false, error: "the parent's cc.nvim has no delegation receiver" }) });
-    expect(noReceiver).toEqual(["20:5 is not tracked as a child of 10:1: the parent's cc.nvim has no delegation receiver"]);
+    const noReceiver = await linkChild(p, c, { register: async () => ({ ok: false, error: "the parent cc.nvim has no delegation receiver" }) });
+    expect(noReceiver).toEqual(["20:5 is not tracked as a child of 10:1: the parent cc.nvim has no delegation receiver"]);
     let unregistered = false;
     const noEvent = await linkChild(p, c, {
       register: async () => ({ ok: true }),

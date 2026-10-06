@@ -2,7 +2,9 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { installForwarder, queryCcInstances, uninstallForwarder } from "../src/cc-rpc.ts";
+import {
+  installForwarder, queryCcInstances, registerCcDelegate, uninstallForwarder, unregisterCcDelegate,
+} from "../src/cc-rpc.ts";
 import { runCommand } from "../src/command.ts";
 
 // Real headless Neovims with stub modules. The child stub has only what
@@ -101,4 +103,21 @@ test("refuses a child Neovim without CcStateChanged, or without that buffer", as
   const parent = { key: "1:2", socket: parentSocket, bufnr: 2, sessionId: null };
   expect(await installForwarder(oldChild, 5, "9:5", parent, 2_000)).toEqual({ ok: false, error: "the child's cc.nvim has no CcStateChanged event" });
   expect(await installForwarder(child, 7, "9:7", parent, 2_000)).toEqual({ ok: false, error: "no cc.nvim instance owns buffer 7" });
+});
+
+test("register and unregister reach the parent's cc.delegation, and name a parent without it", async () => {
+  const [parent, old] = await Promise.all([neovim(`
+    _G.calls = {}
+    package.loaded['cc.delegation'] = {
+      register_bufnr = function(bufnr, child) table.insert(_G.calls, { 'register', bufnr, child.key, child.nvim_pid, child.state }) return true end,
+      unregister_bufnr = function(bufnr, key) table.insert(_G.calls, { 'unregister', bufnr, key }) return true end,
+    }
+  `), neovim("")]);
+  const child = { key: "9:5", socket: "/s", bufnr: 5, nvimPid: 9, sessionId: null, state: "starting" as const };
+  expect(await registerCcDelegate(parent, 2, child, 2_000)).toEqual({ ok: true });
+  expect(await unregisterCcDelegate(parent, 2, "9:5", 2_000)).toEqual({ ok: true });
+  expect(JSON.parse(await expr(parent, "vim.json.encode(_G.calls)"))).toEqual([["register", 2, "9:5", 9, "starting"], ["unregister", 2, "9:5"]]);
+  expect(await registerCcDelegate(old, 2, child, 2_000)).toEqual({
+    ok: false, error: "the parent cc.nvim has no delegation receiver; update cc.nvim and restart Neovim",
+  });
 });

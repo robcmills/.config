@@ -79,11 +79,11 @@ describe("new", () => {
       open: async () => ({ ok: true, bufnr: 5, pid: 999 }),
       inventory: async () => ({ agents: [jarvis], warnings: [] }),
       callerContext: fromJarvis,
-      link: { register: async () => ({ ok: false, error: "the parent's cc.nvim has no delegation receiver" }) },
+      link: { register: async () => ({ ok: false, error: "the parent cc.nvim has no delegation receiver" }) },
       warn: (message) => warnings.push(message),
     });
     expect(key).toBe("999:5");
-    expect(warnings).toEqual(["999:5 is not tracked as a child of 50:1: the parent's cc.nvim has no delegation receiver"]);
+    expect(warnings).toEqual(["999:5 is not tracked as a child of 50:1: the parent cc.nvim has no delegation receiver"]);
   });
 
   test("surfaces the RPC error", async () => {
