@@ -21,6 +21,7 @@ export const TSV_COLUMNS: (keyof Agent)[] = [
   "tmuxWindowId",
   "tmuxWindowName",
   "tmuxPaneId",
+  "delegateCount",
 ];
 
 function escapeTsv(value: unknown): string {
@@ -38,6 +39,7 @@ const COLORS: Record<Agent["state"], string> = {
   interrupting: "\x1b[31m",
   unread: "\x1b[38;5;208;1m",
   working: "\x1b[36m",
+  delegating: "\x1b[34m",
   monitoring: "\x1b[34;1m",
   starting: "\x1b[35m",
   ready: "\x1b[32m",

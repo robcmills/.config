@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import { parseBoolean, parseNamedArgs, parsePositiveInteger, requireArg } from "./args.ts";
 import type { NamedArgs } from "./args.ts";
-import { closeAgent, interruptAgent, KEY_PATTERN, newAgent, sendToAgent, tailAgent } from "./control.ts";
+import {
+  closeAgent, detachAgent, interruptAgent, KEY_PATTERN, newAgent, parseFrom, sendToAgent, tailAgent,
+} from "./control.ts";
 import { formatTsv } from "./format.ts";
 import { buildInventory } from "./inventory.ts";
 import { formatPickerLines, pickAgent, PICKER_ROWS_FLAG } from "./picker.ts";
@@ -22,18 +24,29 @@ const HELP = `Usage:
 
   agents new socket=<path> cwd=<dir> [prompt=<text>|prompt-file=<path>]
              [model=<m>] [effort=<e>] [name=<n>] [provider=claude|codex]
-             [focus=true|false]
-                         Open a cc.nvim instance in that Neovim; prints its key
-  agents send key=<k> prompt=<text>|prompt-file=<path>
-                         Queue a prompt; refuses while the agent is mid-turn
+             [focus=true|false] [from=auto|none|<key>]
+                         Open a cc.nvim instance in that Neovim; prints its key.
+                         from= picks its parent: auto (default) links it to the
+                         agent running this command, if any
+  agents send key=<k> prompt=<text>|prompt-file=<path> [from=auto|none|<key>]
+                         Queue a prompt; refuses while the agent is mid-turn.
+                         Links an unlinked agent to from= (default: the caller)
   agents tail key=<k> [n=<lines>]
                          Print the agent's last assistant message
   agents interrupt key=<k>
                          Interrupt the agent's current turn, like <C-c>; the
                          process stays alive. Exits 1 if nothing was interrupted
   agents close key=<k>   Close the agent
+  agents detach key=<k>  Release the agent from its parent
 
-Keys are <nvim-pid>:<output-bufnr>, as printed by \`agents\`.`;
+Keys are <nvim-pid>:<output-bufnr>, as printed by \`agents\`.
+
+Delegation: an agent with a linked child that is busy (starting, working,
+waiting, interrupting, monitoring, or itself delegating) shows \`delegating\`.
+Links persist across idle turns until detach or close. Each child has one
+parent. Every inventory repairs stale links: it asks children to re-push
+their state, prunes children whose Neovim is dead or no longer has them, and
+re-points children whose parent session moved to another Neovim.`;
 
 function stderr(message: string) {
   console.error(`agents: ${message}`);
@@ -152,6 +165,7 @@ async function run(args: string[]): Promise<number> {
   if (args[0] === "tail") return runTail(args.slice(1));
   if (args[0] === "interrupt") return runInterrupt(args.slice(1));
   if (args[0] === "close") return runClose(args.slice(1));
+  if (args[0] === "detach") return runDetach(args.slice(1));
   stderr("invalid arguments\n" + HELP);
   return 2;
 }
@@ -183,7 +197,7 @@ const controlDependencies = { inventory: () => inventory() };
 
 async function runNew(args: string[]): Promise<number> {
   const parsed = parseNamedArgs(args, {
-    keys: ["socket", "cwd", "prompt", "prompt-file", "model", "effort", "name", "provider", "focus"],
+    keys: ["socket", "cwd", "prompt", "prompt-file", "model", "effort", "name", "provider", "focus", "from"],
   });
   const provider = parsed.values.get("provider");
   if (provider !== undefined && provider !== "claude" && provider !== "codex") {
@@ -199,18 +213,19 @@ async function runNew(args: string[]): Promise<number> {
     name: parsed.values.get("name"),
     provider,
     focus: parseBoolean(parsed.values.get("focus"), "focus"),
-  });
+    from: parseFrom(parsed.values.get("from")),
+  }, { inventory: () => inventory(false) });
   console.log(key);
   return 0;
 }
 
 async function runSend(args: string[]): Promise<number> {
-  const parsed = parseNamedArgs(args, { keys: ["key", "prompt", "prompt-file"] });
+  const parsed = parseNamedArgs(args, { keys: ["key", "prompt", "prompt-file", "from"] });
   const key = requireArg(parsed, "key");
   if (!validKey(key)) return 2;
   const text = readPrompt(parsed);
   if (text === undefined) throw new Error("missing required argument 'prompt=' or 'prompt-file='");
-  await sendToAgent(key, text, controlDependencies);
+  await sendToAgent(key, text, controlDependencies, parseFrom(parsed.values.get("from")));
   return 0;
 }
 
@@ -237,6 +252,15 @@ async function runClose(args: string[]): Promise<number> {
   const key = requireArg(parsed, "key");
   if (!validKey(key)) return 2;
   await closeAgent(key, controlDependencies);
+  return 0;
+}
+
+async function runDetach(args: string[]): Promise<number> {
+  const parsed = parseNamedArgs(args, { keys: ["key"] });
+  const key = requireArg(parsed, "key");
+  if (!validKey(key)) return 2;
+  const agent = await detachAgent(key, controlDependencies);
+  console.log(`${key} detached from ${agent.delegator?.key}`);
   return 0;
 }
 

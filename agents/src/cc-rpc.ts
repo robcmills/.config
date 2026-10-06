@@ -1,10 +1,18 @@
 import { runCommand } from "./command.ts";
 import { AGENT_STATES } from "./types.ts";
-import type { CcInstanceSnapshot, CommandRunner, Provider } from "./types.ts";
+import type {
+  AgentState, CcInstanceSnapshot, CommandRunner, DelegateChild, DelegatorRef, Provider,
+} from "./types.ts";
 
-type RawCcInstanceSnapshot = Omit<CcInstanceSnapshot, "backgroundTaskCount" | "lastModifiedAt"> & {
+type RawCcInstanceSnapshot = Omit<
+  CcInstanceSnapshot,
+  "backgroundTaskCount" | "lastModifiedAt" | "delegateCount" | "children" | "delegator"
+> & {
   backgroundTaskCount?: number;
   lastModifiedAt?: number | null;
+  delegateCount?: unknown;
+  children?: unknown;
+  delegator?: unknown;
 };
 
 const LIST_EXPR = `luaeval("(function() local cc=package.loaded['cc']; if not cc then return '[]' end; if not cc.list_instances then error('cc.nvim agents API unavailable; restart Neovim after updating cc.nvim') end; return vim.json.encode(cc.list_instances()) end)()")`;
@@ -37,6 +45,50 @@ function isSnapshot(value: unknown): value is RawCcInstanceSnapshot {
     && (v.lastModifiedAt === undefined || nullableNumber(v.lastModifiedAt));
 }
 
+function optionalString(value: unknown): string | null {
+  return typeof value === "string" && value !== "" ? value : null;
+}
+
+function optionalInteger(value: unknown): number | null {
+  return Number.isSafeInteger(value) ? value as number : null;
+}
+
+/**
+ * The delegation fields are newer than the rest of the snapshot, so they are
+ * normalized rather than validated: a malformed entry is dropped instead of
+ * rejecting the whole Neovim's inventory.
+ */
+export function normalizeChildren(value: unknown): DelegateChild[] {
+  // An empty Lua table may encode as {} rather than [].
+  if (!Array.isArray(value)) return [];
+  const children: DelegateChild[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const v = entry as Record<string, unknown>;
+    if (typeof v.key !== "string" || !AGENT_STATES.includes(v.state as never)) continue;
+    children.push({
+      key: v.key,
+      sessionId: optionalString(v.sessionId),
+      state: v.state as AgentState,
+      nvimPid: optionalInteger(v.nvimPid),
+      uid: optionalString(v.uid),
+    });
+  }
+  return children;
+}
+
+export function normalizeDelegator(value: unknown): DelegatorRef | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const v = value as Record<string, unknown>;
+  if (typeof v.key !== "string" || v.key === "") return null;
+  return {
+    key: v.key,
+    sessionId: optionalString(v.sessionId),
+    socket: optionalString(v.socket),
+    bufnr: optionalInteger(v.bufnr),
+  };
+}
+
 export interface CcQueryResult {
   snapshots: CcInstanceSnapshot[] | null;
   error?: string;
@@ -64,6 +116,10 @@ export async function queryCcInstances(
         // Keep inventory usable during rolling restarts.
         backgroundTaskCount: snapshot.backgroundTaskCount ?? 0,
         lastModifiedAt: snapshot.lastModifiedAt ?? null,
+        delegateCount: Number.isSafeInteger(snapshot.delegateCount) && (snapshot.delegateCount as number) > 0
+          ? snapshot.delegateCount as number : 0,
+        children: normalizeChildren(snapshot.children),
+        delegator: normalizeDelegator(snapshot.delegator),
       })),
     };
   } catch {
@@ -113,7 +169,7 @@ const API_PROBE_LUA = `type(cc.open) == 'function' and type(cc.send_prompt) == '
 
 const OPEN_LUA = `(function(a) local o = vim.json.decode(a); local cc = require('cc'); if not (${API_PROBE_LUA}) then return vim.json.encode({err='${API_UNAVAILABLE}'}) end; local ok, bufnr, err = pcall(cc.open, o); if not ok then return vim.json.encode({err=tostring(bufnr)}) end; if type(bufnr) ~= 'number' then return vim.json.encode({err=tostring(err or 'cc.open returned no buffer; update cc.nvim and restart Neovim')}) end; return vim.json.encode({bufnr=bufnr, pid=vim.fn.getpid()}) end)(_A)`;
 
-const SEND_LUA = `(function(a) local o = vim.json.decode(a); local cc = require('cc'); if type(cc.send_prompt) ~= 'function' then return vim.json.encode({err='${API_UNAVAILABLE}'}) end; local ok, res, err = pcall(cc.send_prompt, o.bufnr, o.text); if not ok then return vim.json.encode({err=tostring(res)}) end; if not res then return vim.json.encode({err=tostring(err or 'cc.send_prompt failed')}) end; return vim.json.encode({ok=true}) end)(_A)`;
+const SEND_LUA = `(function(a) local o = vim.json.decode(a); local cc = require('cc'); if type(cc.send_prompt) ~= 'function' then return vim.json.encode({err='${API_UNAVAILABLE}'}) end; local ok, res, err = pcall(cc.send_prompt, o.bufnr, o.text, o.delegator and {delegator=o.delegator} or nil); if not ok then return vim.json.encode({err=tostring(res)}) end; if not res then return vim.json.encode({err=tostring(err or 'cc.send_prompt failed')}) end; return vim.json.encode({ok=true}) end)(_A)`;
 
 const TAIL_LUA = `(function(a) local o = vim.json.decode(a); local cc = require('cc'); if type(cc.get_last_assistant_message) ~= 'function' then return vim.json.encode({err='${API_UNAVAILABLE}'}) end; local ok, text, err = pcall(cc.get_last_assistant_message, o.bufnr); if not ok then return vim.json.encode({err=tostring(text)}) end; if type(text) ~= 'string' then return vim.json.encode({err=tostring(err or 'no assistant message yet')}) end; return vim.json.encode({text=text}) end)(_A)`;
 
@@ -171,6 +227,24 @@ async function callCc(
   return { value: envelope };
 }
 
+// Delegation RPCs. Each requires cc.delegation, which older cc.nvim lacks;
+// require fails inside the pcall and comes back as an error envelope.
+const DETACH_LUA = `(function(a) local o = vim.json.decode(a); local okm, D = pcall(require, 'cc.delegation'); if not okm then return vim.json.encode({err='${API_UNAVAILABLE}'}) end; local ok, res, err = pcall(D.detach_bufnr, o.bufnr); if not ok then return vim.json.encode({err=tostring(res)}) end; if not res then return vim.json.encode({err=tostring(err or 'detach failed')}) end; return vim.json.encode({ok=true}) end)(_A)`;
+
+const REPUSH_LUA = `(function(a) local o = vim.json.decode(a); local okm, D = pcall(require, 'cc.delegation'); if not okm then return vim.json.encode({err='${API_UNAVAILABLE}'}) end; local ok, res, err = pcall(D.repush_bufnr, o.bufnr); if not ok then return vim.json.encode({err=tostring(res)}) end; if not res then return vim.json.encode({err=tostring(err or 'repush failed')}) end; return vim.json.encode({ok=true}) end)(_A)`;
+
+const PRUNE_LUA = `(function(a) local o = vim.json.decode(a); local okm, D = pcall(require, 'cc.delegation'); if not okm then return vim.json.encode({err='${API_UNAVAILABLE}'}) end; local ok, res, err = pcall(D.prune_bufnr, o.bufnr, o.child, o.uid); if not ok then return vim.json.encode({err=tostring(res)}) end; if not res then return vim.json.encode({err=tostring(err or 'prune failed')}) end; return vim.json.encode({ok=true}) end)(_A)`;
+
+const REBIND_LUA = `(function(a) local o = vim.json.decode(a); local okm, D = pcall(require, 'cc.delegation'); if not okm then return vim.json.encode({err='${API_UNAVAILABLE}'}) end; local ok, res, err = pcall(D.rebind_bufnr, o.bufnr, o.delegator); if not ok then return vim.json.encode({err=tostring(res)}) end; if not res then return vim.json.encode({err=tostring(err or 'rebind failed')}) end; return vim.json.encode({ok=true}) end)(_A)`;
+
+/** Where a child pushes its state: the parent's agent key, Neovim socket, output buffer, and session. */
+export interface CcDelegator {
+  key: string;
+  socket: string;
+  bufnr: number;
+  session_id: string | null;
+}
+
 export interface CcOpenOptions {
   cwd: string;
   prompt?: string;
@@ -180,6 +254,7 @@ export interface CcOpenOptions {
   provider?: Provider;
   focus?: boolean;
   permission_mode?: string;
+  delegator?: CcDelegator;
 }
 
 export interface CcOpenResult {
@@ -215,12 +290,12 @@ export async function sendCcPrompt(
   text: string,
   timeoutMs = 3_000,
   run: CommandRunner = runCommand,
+  delegator?: CcDelegator,
 ): Promise<{ ok: boolean; error?: string }> {
   if (!validBufnr(outputBufnr)) return { ok: false, error: "invalid output buffer number" };
   if (text.trim() === "") return { ok: false, error: "prompt is empty" };
-  const { value, error } = await callCc(
-    socketPath, SEND_LUA, { bufnr: outputBufnr, text }, timeoutMs, run, "send_prompt",
-  );
+  const arg = delegator ? { bufnr: outputBufnr, text, delegator } : { bufnr: outputBufnr, text };
+  const { value, error } = await callCc(socketPath, SEND_LUA, arg, timeoutMs, run, "send_prompt");
   return value ? { ok: true } : { ok: false, error };
 }
 
@@ -263,4 +338,49 @@ export async function interruptCcInstance(
     socketPath, STOP_LUA, { bufnr: outputBufnr }, timeoutMs, run, "stop",
   );
   return value ? { ok: true } : { ok: false, error };
+}
+
+async function delegationCall(
+  socketPath: string,
+  lua: string,
+  arg: { bufnr: number; [key: string]: unknown },
+  label: string,
+  timeoutMs: number,
+  run: CommandRunner,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!validBufnr(arg.bufnr)) return { ok: false, error: "invalid output buffer number" };
+  const { value, error } = await callCc(socketPath, lua, arg, timeoutMs, run, label);
+  return value ? { ok: true } : { ok: false, error };
+}
+
+/** Release a child's link to its parent. */
+export function detachCcInstance(
+  socketPath: string, outputBufnr: number, timeoutMs = 3_000, run: CommandRunner = runCommand,
+) {
+  return delegationCall(socketPath, DETACH_LUA, { bufnr: outputBufnr }, "detach", timeoutMs, run);
+}
+
+/** Ask a child to push its current state to its parent again. */
+export function repushCcInstance(
+  socketPath: string, outputBufnr: number, timeoutMs = 750, run: CommandRunner = runCommand,
+) {
+  return delegationCall(socketPath, REPUSH_LUA, { bufnr: outputBufnr }, "repush", timeoutMs, run);
+}
+
+/** Drop one child entry from a parent, only if it is still the incarnation `uid`. */
+export function pruneCcDelegate(
+  socketPath: string, parentBufnr: number, childKey: string, uid: string | null,
+  timeoutMs = 750, run: CommandRunner = runCommand,
+) {
+  return delegationCall(
+    socketPath, PRUNE_LUA, { bufnr: parentBufnr, child: childKey, uid }, "prune", timeoutMs, run,
+  );
+}
+
+/** Point a child at its parent's new address (same session, restarted Neovim) and push. */
+export function rebindCcInstance(
+  socketPath: string, outputBufnr: number, delegator: CcDelegator,
+  timeoutMs = 750, run: CommandRunner = runCommand,
+) {
+  return delegationCall(socketPath, REBIND_LUA, { bufnr: outputBufnr, delegator }, "rebind", timeoutMs, run);
 }

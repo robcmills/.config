@@ -16,6 +16,7 @@ export default {
       "interrupting",
       "unread",
       "working",
+      "delegating",
       "monitoring",
       "starting",
       "ready",

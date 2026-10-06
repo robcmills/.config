@@ -3,6 +3,7 @@ export const AGENT_STATES = [
   "interrupting",
   "unread",
   "working",
+  "delegating",
   "monitoring",
   "starting",
   "ready",
@@ -25,6 +26,28 @@ export interface CcInstanceSnapshot {
   turnElapsedMs: number | null;
   backgroundTaskCount: number;
   lastModifiedAt: number | null;
+  /** Linked child agents that are busy; counts even when another state wins. */
+  delegateCount: number;
+  /** Children linked to this agent, as it last heard from them. */
+  children: DelegateChild[];
+  /** The agent this one reports to, or null when unlinked. */
+  delegator: DelegatorRef | null;
+}
+
+export interface DelegateChild {
+  key: string;
+  sessionId: string | null;
+  state: AgentState;
+  nvimPid: number | null;
+  /** cc.nvim's per-instance link id; identifies the exact child incarnation. */
+  uid: string | null;
+}
+
+export interface DelegatorRef {
+  key: string;
+  sessionId: string | null;
+  socket: string | null;
+  bufnr: number | null;
 }
 
 export interface TmuxPane {

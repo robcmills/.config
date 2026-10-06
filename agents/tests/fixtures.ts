@@ -22,6 +22,9 @@ export function agent(overrides: Partial<Agent> = {}): Agent {
     turnElapsedMs: null,
     backgroundTaskCount: 0,
     lastModifiedAt: 1_700_000_000_000,
+    delegateCount: 0,
+    children: [],
+    delegator: null,
     ...overrides,
   };
 }
