@@ -46,20 +46,44 @@ describe("new", () => {
     expect(called).toBe(false);
   });
 
-  test("passes the resolved caller into cc.open so the link exists before the first prompt", async () => {
+  test("links a new agent to the resolved caller: register in the parent, then install the forwarder", async () => {
     const dir = mkdtempSync(join(tmpdir(), "agents-"));
     const socket = join(dir, "nvim.999.0");
     writeFileSync(socket, "");
-    const opened: unknown[] = [];
-    const open = async (_socket: string, options: unknown) => { opened.push(options); return { ok: true, bufnr: 5, pid: 999 }; };
+    const calls: unknown[][] = [];
+    const open = async (_socket: string, options: unknown) => { calls.push(["open", options]); return { ok: true, bufnr: 5, pid: 999 }; };
+    const link = {
+      register: async (...args: unknown[]) => { calls.push(["register", ...args]); return { ok: true }; },
+      install: async (...args: unknown[]) => { calls.push(["install", ...args]); return { ok: true }; },
+    };
     const inventory = async () => ({ agents: [jarvis], warnings: [] });
-    await newAgent({ socket, cwd: dir, prompt: "go" }, { open, inventory, callerContext: fromJarvis });
-    expect(opened[0]).toEqual({ cwd: dir, prompt: "go", delegator: { key: "50:1", socket: "/nvim.50", bufnr: 1, session_id: "J" } });
-    await newAgent({ socket, cwd: dir }, { open, inventory, callerContext: shell });
-    await newAgent({ socket, cwd: dir, from: "none" }, { open, inventory, callerContext: fromJarvis });
-    await newAgent({ socket, cwd: dir }, { open, inventory: async () => { throw new Error("no tmux"); }, callerContext: fromJarvis });
-    expect(opened.slice(1)).toEqual([{ cwd: dir }, { cwd: dir }, { cwd: dir }]);
+    await newAgent({ socket, cwd: dir, prompt: "go" }, { open, inventory, callerContext: fromJarvis, link });
+    expect(calls.map((call) => call[0])).toEqual(["open", "register", "install"]);
+    expect(calls[0]![1]).toEqual({ cwd: dir, prompt: "go" });
+    expect(calls[1]!.slice(1)).toEqual(["/nvim.50", 1, { key: "999:5", socket, bufnr: 5, nvimPid: 999, sessionId: null, state: "starting" }]);
+    expect(calls[2]!.slice(1)).toEqual([socket, 5, "999:5", { key: "50:1", socket: "/nvim.50", bufnr: 1, sessionId: "J" }]);
+    calls.length = 0;
+    await newAgent({ socket, cwd: dir }, { open, inventory, callerContext: shell, link });
+    await newAgent({ socket, cwd: dir, from: "none" }, { open, inventory, callerContext: fromJarvis, link });
+    await newAgent({ socket, cwd: dir }, { open, inventory: async () => { throw new Error("no tmux"); }, callerContext: fromJarvis, link });
+    expect(calls.map((call) => call[0])).toEqual(["open", "open", "open"]);
     await expect(newAgent({ socket, cwd: dir, from: { key: "9:9" } }, { open, inventory })).rejects.toThrow("from= agent not found");
+  });
+
+  test("warns, and still returns the key, when the link cannot be tracked", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agents-"));
+    const socket = join(dir, "nvim.999.0");
+    writeFileSync(socket, "");
+    const warnings: string[] = [];
+    const key = await newAgent({ socket, cwd: dir }, {
+      open: async () => ({ ok: true, bufnr: 5, pid: 999 }),
+      inventory: async () => ({ agents: [jarvis], warnings: [] }),
+      callerContext: fromJarvis,
+      link: { register: async () => ({ ok: false, error: "the parent's cc.nvim has no delegation receiver" }) },
+      warn: (message) => warnings.push(message),
+    });
+    expect(key).toBe("999:5");
+    expect(warnings).toEqual(["999:5 is not tracked as a child of 50:1: the parent's cc.nvim has no delegation receiver"]);
   });
 
   test("surfaces the RPC error", async () => {
@@ -98,26 +122,35 @@ describe("send", () => {
     expect(calls[0]).toEqual(["/tmp/nvim.100.0", 7, "hi there"]);
   });
 
-  test("links an unlinked target to the caller, and keeps an existing owner", async () => {
+  test("links an unlinked target to the caller and keeps an existing owner, before sending", async () => {
     const calls: unknown[][] = [];
-    const send = async (...args: unknown[]) => { calls.push(args); return { ok: true }; };
+    const send = async () => { calls.push(["send"]); return { ok: true }; };
+    const link = {
+      register: async (...args: unknown[]) => { calls.push(["register", ...args]); return { ok: true }; },
+      install: async (...args: unknown[]) => { calls.push(["install", ...args]); return { ok: true }; },
+    };
     const worker = agent({ key: "60:2", nvimPid: 60, outputBufnr: 2, socketPath: "/nvim.60" });
-    await sendToAgent("60:2", "go", { inventory: async () => ({ agents: [jarvis, worker], warnings: [] }), send, callerContext: fromJarvis });
-    expect(calls[0]?.[5]).toEqual({ key: "50:1", socket: "/nvim.50", bufnr: 1, session_id: "J" });
-    const owned = { ...worker, delegator: { key: "70:1", sessionId: null, socket: "/nvim.70", bufnr: 1 } };
-    await sendToAgent("60:2", "go", { inventory: async () => ({ agents: [jarvis, owned], warnings: [] }), send, callerContext: fromJarvis });
-    expect(calls[1]).toHaveLength(3);
+    await sendToAgent("60:2", "go", { inventory: async () => ({ agents: [jarvis, worker], warnings: [] }), send, callerContext: fromJarvis, link });
+    expect(calls.map((call) => call[0])).toEqual(["register", "install", "send"]);
+    expect(calls[0]![1]).toBe("/nvim.50");
+    calls.length = 0;
+    const owner = { key: "70:1", socket: "/nvim.70", bufnr: 1, sessionId: null };
+    const owned = { ...worker, delegator: owner };
+    await sendToAgent("60:2", "go", { inventory: async () => ({ agents: [jarvis, owned], warnings: [] }), send, callerContext: fromJarvis, link });
+    expect(calls[0]).toEqual(["register", "/nvim.70", 1, expect.objectContaining({ key: "60:2" })]);
+    expect(calls[1]![4]).toEqual(owner);
   });
 
   test("never links an agent to itself or to its own descendant", async () => {
-    const calls: unknown[][] = [];
-    const send = async (...args: unknown[]) => { calls.push(args); return { ok: true }; };
+    const calls: string[] = [];
+    const send = async () => { calls.push("send"); return { ok: true }; };
+    const link = { register: async () => { calls.push("register"); return { ok: true }; }, install: async () => ({ ok: true }) };
     // The Worker (child of Jarvis) sends to Jarvis: linking would make a cycle.
     const worker = agent({ key: "60:2", pid: 300, delegator: { key: "50:1", sessionId: "J", socket: "/nvim.50", bufnr: 1 } });
     const boss = { ...jarvis, pid: 301 };
-    await sendToAgent("50:1", "report", { inventory: async () => ({ agents: [boss, worker], warnings: [] }), send, callerContext: fromJarvis });
-    await sendToAgent("50:1", "self", { inventory: async () => ({ agents: [jarvis], warnings: [] }), send, callerContext: fromJarvis });
-    expect(calls.map((call) => call.length)).toEqual([3, 3]);
+    await sendToAgent("50:1", "report", { inventory: async () => ({ agents: [boss, worker], warnings: [] }), send, callerContext: fromJarvis, link });
+    await sendToAgent("50:1", "self", { inventory: async () => ({ agents: [jarvis], warnings: [] }), send, callerContext: fromJarvis, link });
+    expect(calls).toEqual(["send", "send"]);
   });
 
   test("from= accepts auto, none, or a key", () => {
@@ -157,14 +190,18 @@ describe("tail", () => {
 });
 
 describe("detach", () => {
-  test("detaches a linked agent and refuses an unlinked one", async () => {
-    const calls: unknown[] = [];
+  test("removes the forwarder and the parent's entry; refuses an unlinked agent", async () => {
+    const calls: unknown[][] = [];
     const linked = agent({ delegator: { key: "50:1", sessionId: "J", socket: "/nvim.50", bufnr: 1 } });
+    const boss = { ...jarvis, children: [{ key: "100:7", sessionId: null, state: "ready" as const, nvimPid: 100 }] };
     await detachAgent("100:7", {
-      inventory: async () => ({ agents: [linked], warnings: [] }),
-      detach: async (socketPath, bufnr) => { calls.push([socketPath, bufnr]); return { ok: true }; },
+      inventory: async () => ({ agents: [boss, linked], warnings: [] }),
+      link: {
+        uninstall: async (...args: unknown[]) => { calls.push(["uninstall", ...args]); return { ok: true }; },
+        unregister: async (...args: unknown[]) => { calls.push(["unregister", ...args]); return { ok: true }; },
+      },
     });
-    expect(calls).toEqual([["/tmp/nvim.100.0", 7]]);
+    expect(calls).toEqual([["uninstall", "/tmp/nvim.100.0", 7], ["unregister", "/nvim.50", 1, "100:7"]]);
     await expect(detachAgent("100:7", { inventory: inventoryWith("ready") })).rejects.toThrow("has no parent");
   });
 });

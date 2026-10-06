@@ -32,16 +32,21 @@ test("cc inventory tolerates pre-lastModified snapshots during rolling restarts"
   expect((await queryCcInstances("/socket", 100, run)).snapshots?.[0]?.backgroundTaskCount).toBe(0);
 });
 
-test("cc inventory accepts delegating and normalizes the link fields", async () => {
+test("cc inventory reads snapshots and forwarders, and normalizes the link fields", async () => {
   const base = { outputBufnr: 1, promptBufnr: 2, sessionId: "s", name: null, provider: "claude", model: null, cwd: "/x", pid: 3, turnElapsedMs: null };
   const run: CommandRunner = async () => ({
-    stdout: JSON.stringify([
-      { ...base, state: "delegating", delegateCount: 2,
-        children: [{ key: "9:1", sessionId: "c", state: "working", nvimPid: 9, uid: "u" }, { key: "9:2", state: "bogus" }],
-        delegator: { key: "8:1", sessionId: "p", socket: "/s", bufnr: 1 } },
-      // An empty Lua table encodes as {}, and older cc.nvim omits the fields.
-      { ...base, outputBufnr: 3, state: "ready", children: {} },
-    ]),
+    stdout: JSON.stringify({
+      instances: [
+        { ...base, state: "delegating", delegateCount: 2,
+          children: [{ key: "9:1", sessionId: "c", state: "working", nvimPid: 9 }, { key: "9:2", state: "bogus" }] },
+        // An empty Lua table encodes as {}, and older cc.nvim omits the fields.
+        { ...base, outputBufnr: 3, state: "ready", children: {} },
+      ],
+      forwarders: [
+        { name: "f", childBufnr: 3, childKey: "7:3", parent: { key: "8:1", socket: "/s", bufnr: 1, session_id: "p" } },
+        { name: "broken" },
+      ],
+    }),
     stderr: "", exitCode: 0, timedOut: false,
   });
   const result = await queryCcInstances("/socket", 100, run);
@@ -49,11 +54,15 @@ test("cc inventory accepts delegating and normalizes the link fields", async () 
   const [first, second] = result.snapshots!;
   expect(first?.state).toBe("delegating");
   expect(first?.delegateCount).toBe(2);
-  expect(first?.children).toEqual([{ key: "9:1", sessionId: "c", state: "working", nvimPid: 9, uid: "u" }]);
-  expect(first?.delegator).toEqual({ key: "8:1", sessionId: "p", socket: "/s", bufnr: 1 });
+  expect(first?.children).toEqual([{ key: "9:1", sessionId: "c", state: "working", nvimPid: 9 }]);
   expect(second?.delegateCount).toBe(0);
   expect(second?.children).toEqual([]);
-  expect(second?.delegator).toBeNull();
+  expect(result.forwarders).toEqual([{ name: "f", childBufnr: 3, childKey: "7:3", parent: { key: "8:1", socket: "/s", bufnr: 1, sessionId: "p" } }]);
+});
+
+test("cc inventory accepts the bare array a Neovim without cc.nvim returns", async () => {
+  const run: CommandRunner = async () => ({ stdout: "[]", stderr: "", exitCode: 0, timedOut: false });
+  expect(await queryCcInstances("/socket", 100, run)).toEqual({ forwarders: [], snapshots: [] });
 });
 
 test("focus validates the numeric buffer before constructing RPC arguments", async () => {

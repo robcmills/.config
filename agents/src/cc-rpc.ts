@@ -1,21 +1,23 @@
+import { readFileSync } from "node:fs";
 import { runCommand } from "./command.ts";
 import { AGENT_STATES } from "./types.ts";
 import type {
-  AgentState, CcInstanceSnapshot, CommandRunner, DelegateChild, DelegatorRef, Provider,
+  AgentState, CcInstanceSnapshot, CommandRunner, DelegateChild, ForwarderRecord, ParentRef, Provider,
 } from "./types.ts";
 
 type RawCcInstanceSnapshot = Omit<
   CcInstanceSnapshot,
-  "backgroundTaskCount" | "lastModifiedAt" | "delegateCount" | "children" | "delegator"
+  "backgroundTaskCount" | "lastModifiedAt" | "delegateCount" | "children"
 > & {
   backgroundTaskCount?: number;
   lastModifiedAt?: number | null;
   delegateCount?: unknown;
   children?: unknown;
-  delegator?: unknown;
 };
 
-const LIST_EXPR = `luaeval("(function() local cc=package.loaded['cc']; if not cc then return '[]' end; if not cc.list_instances then error('cc.nvim agents API unavailable; restart Neovim after updating cc.nvim') end; return vim.json.encode(cc.list_instances()) end)()")`;
+// Snapshots plus the delegation forwarders `agents` installed in this Neovim
+// (src/forwarder.lua keeps them in a global registry). One RPC for both.
+const LIST_EXPR = `luaeval("(function() local cc=package.loaded['cc']; if not cc then return '[]' end; if not cc.list_instances then error('cc.nvim agents API unavailable; restart Neovim after updating cc.nvim') end; local f = {}; for _, e in pairs(_G.cc_delegation_forwarders or {}) do table.insert(f, {name=e.name, parent=e.parent, childBufnr=e.child_bufnr, childKey=e.child_key}) end; return vim.json.encode({instances=cc.list_instances(), forwarders=f}) end)()")`;
 
 function conciseError(value: string, fallback: string): string {
   const firstLine = value.trim().split("\n")[0]?.trim();
@@ -71,26 +73,35 @@ export function normalizeChildren(value: unknown): DelegateChild[] {
       sessionId: optionalString(v.sessionId),
       state: v.state as AgentState,
       nvimPid: optionalInteger(v.nvimPid),
-      uid: optionalString(v.uid),
     });
   }
   return children;
 }
 
-export function normalizeDelegator(value: unknown): DelegatorRef | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const v = value as Record<string, unknown>;
-  if (typeof v.key !== "string" || v.key === "") return null;
-  return {
-    key: v.key,
-    sessionId: optionalString(v.sessionId),
-    socket: optionalString(v.socket),
-    bufnr: optionalInteger(v.bufnr),
-  };
+/** Forwarder registry entries; malformed ones are dropped. */
+export function normalizeForwarders(value: unknown): Omit<ForwarderRecord, "nvimPid" | "socketPath">[] {
+  if (!Array.isArray(value)) return [];
+  const records: Omit<ForwarderRecord, "nvimPid" | "socketPath">[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const v = entry as Record<string, unknown>;
+    const parent = v.parent as Record<string, unknown> | undefined;
+    if (typeof v.name !== "string" || typeof v.childKey !== "string" || !Number.isSafeInteger(v.childBufnr)
+        || !parent || typeof parent.key !== "string" || typeof parent.socket !== "string"
+        || !Number.isSafeInteger(parent.bufnr)) continue;
+    records.push({
+      name: v.name,
+      childKey: v.childKey,
+      childBufnr: v.childBufnr as number,
+      parent: { key: parent.key, socket: parent.socket, bufnr: parent.bufnr as number, sessionId: optionalString(parent.session_id) },
+    });
+  }
+  return records;
 }
 
 export interface CcQueryResult {
   snapshots: CcInstanceSnapshot[] | null;
+  forwarders?: Omit<ForwarderRecord, "nvimPid" | "socketPath">[];
   error?: string;
 }
 
@@ -105,11 +116,15 @@ export async function queryCcInstances(
     return { snapshots: null, error: conciseError(result.stderr, "cc.nvim inventory RPC failed") };
   }
   try {
-    const parsed = JSON.parse(result.stdout.trim()) as unknown;
+    const raw = JSON.parse(result.stdout.trim()) as unknown;
+    // `[]` when cc.nvim is not loaded; otherwise { instances, forwarders }.
+    const body = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : null;
+    const parsed = body ? body.instances : raw;
     if (!Array.isArray(parsed) || !parsed.every(isSnapshot)) {
       return { snapshots: null, error: "cc.nvim returned an invalid instance snapshot" };
     }
     return {
+      forwarders: normalizeForwarders(body?.forwarders),
       snapshots: parsed.map((snapshot) => ({
         ...snapshot,
         // Older already-running Neovim processes do not expose these fields.
@@ -119,7 +134,6 @@ export async function queryCcInstances(
         delegateCount: Number.isSafeInteger(snapshot.delegateCount) && (snapshot.delegateCount as number) > 0
           ? snapshot.delegateCount as number : 0,
         children: normalizeChildren(snapshot.children),
-        delegator: normalizeDelegator(snapshot.delegator),
       })),
     };
   } catch {
@@ -169,7 +183,7 @@ const API_PROBE_LUA = `type(cc.open) == 'function' and type(cc.send_prompt) == '
 
 const OPEN_LUA = `(function(a) local o = vim.json.decode(a); local cc = require('cc'); if not (${API_PROBE_LUA}) then return vim.json.encode({err='${API_UNAVAILABLE}'}) end; local ok, bufnr, err = pcall(cc.open, o); if not ok then return vim.json.encode({err=tostring(bufnr)}) end; if type(bufnr) ~= 'number' then return vim.json.encode({err=tostring(err or 'cc.open returned no buffer; update cc.nvim and restart Neovim')}) end; return vim.json.encode({bufnr=bufnr, pid=vim.fn.getpid()}) end)(_A)`;
 
-const SEND_LUA = `(function(a) local o = vim.json.decode(a); local cc = require('cc'); if type(cc.send_prompt) ~= 'function' then return vim.json.encode({err='${API_UNAVAILABLE}'}) end; local ok, res, err = pcall(cc.send_prompt, o.bufnr, o.text, o.delegator and {delegator=o.delegator} or nil); if not ok then return vim.json.encode({err=tostring(res)}) end; if not res then return vim.json.encode({err=tostring(err or 'cc.send_prompt failed')}) end; return vim.json.encode({ok=true}) end)(_A)`;
+const SEND_LUA = `(function(a) local o = vim.json.decode(a); local cc = require('cc'); if type(cc.send_prompt) ~= 'function' then return vim.json.encode({err='${API_UNAVAILABLE}'}) end; local ok, res, err = pcall(cc.send_prompt, o.bufnr, o.text); if not ok then return vim.json.encode({err=tostring(res)}) end; if not res then return vim.json.encode({err=tostring(err or 'cc.send_prompt failed')}) end; return vim.json.encode({ok=true}) end)(_A)`;
 
 const TAIL_LUA = `(function(a) local o = vim.json.decode(a); local cc = require('cc'); if type(cc.get_last_assistant_message) ~= 'function' then return vim.json.encode({err='${API_UNAVAILABLE}'}) end; local ok, text, err = pcall(cc.get_last_assistant_message, o.bufnr); if not ok then return vim.json.encode({err=tostring(text)}) end; if type(text) ~= 'string' then return vim.json.encode({err=tostring(err or 'no assistant message yet')}) end; return vim.json.encode({text=text}) end)(_A)`;
 
@@ -227,22 +241,22 @@ async function callCc(
   return { value: envelope };
 }
 
-// Delegation RPCs. Each requires cc.delegation, which older cc.nvim lacks;
-// require fails inside the pcall and comes back as an error envelope.
-const DETACH_LUA = `(function(a) local o = vim.json.decode(a); local okm, D = pcall(require, 'cc.delegation'); if not okm then return vim.json.encode({err='${API_UNAVAILABLE}'}) end; local ok, res, err = pcall(D.detach_bufnr, o.bufnr); if not ok then return vim.json.encode({err=tostring(res)}) end; if not res then return vim.json.encode({err=tostring(err or 'detach failed')}) end; return vim.json.encode({ok=true}) end)(_A)`;
+// Delegation RPCs. The parent's cc.nvim owns the link (cc.delegation); the
+// child's Neovim only runs a forwarder that `agents` installs, so a child on
+// any cc.nvim with CcStateChanged is tracked.
+const RECEIVER_UNAVAILABLE = "the parent's cc.nvim has no delegation receiver; update cc.nvim and restart Neovim";
 
-const REPUSH_LUA = `(function(a) local o = vim.json.decode(a); local okm, D = pcall(require, 'cc.delegation'); if not okm then return vim.json.encode({err='${API_UNAVAILABLE}'}) end; local ok, res, err = pcall(D.repush_bufnr, o.bufnr); if not ok then return vim.json.encode({err=tostring(res)}) end; if not res then return vim.json.encode({err=tostring(err or 'repush failed')}) end; return vim.json.encode({ok=true}) end)(_A)`;
+const REGISTER_LUA = `(function(a) local o = vim.json.decode(a); local okm, D = pcall(require, 'cc.delegation'); if not okm or type(D.register_bufnr) ~= 'function' then return vim.json.encode({err='${RECEIVER_UNAVAILABLE}'}) end; local ok, res, err = pcall(D.register_bufnr, o.bufnr, o.child); if not ok then return vim.json.encode({err=tostring(res)}) end; if not res then return vim.json.encode({err=tostring(err or 'register failed')}) end; return vim.json.encode({ok=true}) end)(_A)`;
 
-const PRUNE_LUA = `(function(a) local o = vim.json.decode(a); local okm, D = pcall(require, 'cc.delegation'); if not okm then return vim.json.encode({err='${API_UNAVAILABLE}'}) end; local ok, res, err = pcall(D.prune_bufnr, o.bufnr, o.child, o.uid); if not ok then return vim.json.encode({err=tostring(res)}) end; if not res then return vim.json.encode({err=tostring(err or 'prune failed')}) end; return vim.json.encode({ok=true}) end)(_A)`;
+const UNREGISTER_LUA = `(function(a) local o = vim.json.decode(a); local okm, D = pcall(require, 'cc.delegation'); if not okm or type(D.unregister_bufnr) ~= 'function' then return vim.json.encode({err='${RECEIVER_UNAVAILABLE}'}) end; local ok, res, err = pcall(D.unregister_bufnr, o.bufnr, o.child); if not ok then return vim.json.encode({err=tostring(res)}) end; if not res then return vim.json.encode({err=tostring(err or 'unregister failed')}) end; return vim.json.encode({ok=true}) end)(_A)`;
 
-const REBIND_LUA = `(function(a) local o = vim.json.decode(a); local okm, D = pcall(require, 'cc.delegation'); if not okm then return vim.json.encode({err='${API_UNAVAILABLE}'}) end; local ok, res, err = pcall(D.rebind_bufnr, o.bufnr, o.delegator); if not ok then return vim.json.encode({err=tostring(res)}) end; if not res then return vim.json.encode({err=tostring(err or 'rebind failed')}) end; return vim.json.encode({ok=true}) end)(_A)`;
+// Runs src/forwarder.lua, sent as data, so it needs nothing installed there.
+const CHUNK_LUA = `(function(a) local o = vim.json.decode(a); local f, e = loadstring(o.code, '=agents-forwarder'); if not f then return vim.json.encode({err=tostring(e)}) end; local ok, res = pcall(f, o.arg); if not ok then return vim.json.encode({err=tostring(res)}) end; return vim.json.encode(res) end)(_A)`;
 
-/** Where a child pushes its state: the parent's agent key, Neovim socket, output buffer, and session. */
-export interface CcDelegator {
-  key: string;
-  socket: string;
-  bufnr: number;
-  session_id: string | null;
+let forwarderCode: string | null = null;
+function forwarderSource(): string {
+  forwarderCode ??= readFileSync(new URL("./forwarder.lua", import.meta.url), "utf8");
+  return forwarderCode;
 }
 
 export interface CcOpenOptions {
@@ -254,7 +268,6 @@ export interface CcOpenOptions {
   provider?: Provider;
   focus?: boolean;
   permission_mode?: string;
-  delegator?: CcDelegator;
 }
 
 export interface CcOpenResult {
@@ -290,12 +303,10 @@ export async function sendCcPrompt(
   text: string,
   timeoutMs = 3_000,
   run: CommandRunner = runCommand,
-  delegator?: CcDelegator,
 ): Promise<{ ok: boolean; error?: string }> {
   if (!validBufnr(outputBufnr)) return { ok: false, error: "invalid output buffer number" };
   if (text.trim() === "") return { ok: false, error: "prompt is empty" };
-  const arg = delegator ? { bufnr: outputBufnr, text, delegator } : { bufnr: outputBufnr, text };
-  const { value, error } = await callCc(socketPath, SEND_LUA, arg, timeoutMs, run, "send_prompt");
+  const { value, error } = await callCc(socketPath, SEND_LUA, { bufnr: outputBufnr, text }, timeoutMs, run, "send_prompt");
   return value ? { ok: true } : { ok: false, error };
 }
 
@@ -340,47 +351,59 @@ export async function interruptCcInstance(
   return value ? { ok: true } : { ok: false, error };
 }
 
-async function delegationCall(
-  socketPath: string,
-  lua: string,
-  arg: { bufnr: number; [key: string]: unknown },
-  label: string,
-  timeoutMs: number,
-  run: CommandRunner,
+export interface ChildRef {
+  key: string;
+  socket: string;
+  bufnr: number;
+  nvimPid: number;
+  sessionId: string | null;
+  state: AgentState;
+}
+
+async function envelopeCall(
+  socketPath: string, lua: string, arg: unknown, label: string, timeoutMs: number, run: CommandRunner,
 ): Promise<{ ok: boolean; error?: string }> {
-  if (!validBufnr(arg.bufnr)) return { ok: false, error: "invalid output buffer number" };
   const { value, error } = await callCc(socketPath, lua, arg, timeoutMs, run, label);
   return value ? { ok: true } : { ok: false, error };
 }
 
-/** Release a child's link to its parent. */
-export function detachCcInstance(
-  socketPath: string, outputBufnr: number, timeoutMs = 3_000, run: CommandRunner = runCommand,
+/** Register a child with the parent at `parentBufnr` in the parent's Neovim. */
+export function registerCcDelegate(
+  socketPath: string, parentBufnr: number, child: ChildRef, timeoutMs = 750, run: CommandRunner = runCommand,
 ) {
-  return delegationCall(socketPath, DETACH_LUA, { bufnr: outputBufnr }, "detach", timeoutMs, run);
+  const arg = {
+    bufnr: parentBufnr,
+    child: { key: child.key, socket: child.socket, nvim_pid: child.nvimPid, bufnr: child.bufnr, session_id: child.sessionId, state: child.state },
+  };
+  return envelopeCall(socketPath, REGISTER_LUA, arg, "register", timeoutMs, run);
 }
 
-/** Ask a child to push its current state to its parent again. */
-export function repushCcInstance(
-  socketPath: string, outputBufnr: number, timeoutMs = 750, run: CommandRunner = runCommand,
+/** Drop a child from the parent at `parentBufnr`. */
+export function unregisterCcDelegate(
+  socketPath: string, parentBufnr: number, childKey: string, timeoutMs = 750, run: CommandRunner = runCommand,
 ) {
-  return delegationCall(socketPath, REPUSH_LUA, { bufnr: outputBufnr }, "repush", timeoutMs, run);
+  return envelopeCall(socketPath, UNREGISTER_LUA, { bufnr: parentBufnr, child: childKey }, "unregister", timeoutMs, run);
 }
 
-/** Drop one child entry from a parent, only if it is still the incarnation `uid`. */
-export function pruneCcDelegate(
-  socketPath: string, parentBufnr: number, childKey: string, uid: string | null,
+/**
+ * Install the forwarder for `childBufnr` in the child's Neovim, then push the
+ * child's current state once. Idempotent, so it also serves as a re-push.
+ */
+export function installForwarder(
+  socketPath: string, childBufnr: number, childKey: string, parent: ParentRef,
   timeoutMs = 750, run: CommandRunner = runCommand,
 ) {
-  return delegationCall(
-    socketPath, PRUNE_LUA, { bufnr: parentBufnr, child: childKey, uid }, "prune", timeoutMs, run,
-  );
+  const arg = {
+    op: "install", child_bufnr: childBufnr, child_key: childKey,
+    parent: { key: parent.key, socket: parent.socket, bufnr: parent.bufnr, session_id: parent.sessionId },
+  };
+  return envelopeCall(socketPath, CHUNK_LUA, { code: forwarderSource(), arg }, "forwarder install", timeoutMs, run);
 }
 
-/** Point a child at its parent's new address (same session, restarted Neovim) and push. */
-export function rebindCcInstance(
-  socketPath: string, outputBufnr: number, delegator: CcDelegator,
-  timeoutMs = 750, run: CommandRunner = runCommand,
+/** Remove the forwarders for `childBufnr` (only the one to `parentKey` when given). */
+export function uninstallForwarder(
+  socketPath: string, childBufnr: number, parentKey?: string, timeoutMs = 750, run: CommandRunner = runCommand,
 ) {
-  return delegationCall(socketPath, REBIND_LUA, { bufnr: outputBufnr, delegator }, "rebind", timeoutMs, run);
+  const arg = { op: "uninstall", child_bufnr: childBufnr, ...(parentKey ? { parent_key: parentKey } : {}) };
+  return envelopeCall(socketPath, CHUNK_LUA, { code: forwarderSource(), arg }, "forwarder uninstall", timeoutMs, run);
 }

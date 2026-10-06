@@ -4,16 +4,18 @@ import { resolveCaller } from "./caller.ts";
 import type { CallerContext } from "./caller.ts";
 import {
   closeCcInstance,
-  detachCcInstance,
   getCcLastAssistantMessage,
   interruptCcInstance,
   openCcInstance,
   sendCcPrompt,
+  uninstallForwarder,
+  unregisterCcDelegate,
 } from "./cc-rpc.ts";
-import type { CcDelegator, CcOpenOptions } from "./cc-rpc.ts";
-import { toDelegator, wouldCycle } from "./delegation.ts";
+import type { CcOpenOptions } from "./cc-rpc.ts";
+import { childRefOf, linkChild, parentRefOf, wouldCycle } from "./delegation.ts";
+import type { LinkDependencies } from "./delegation.ts";
 import { discoverProcessParents } from "./discover-tmux.ts";
-import type { Agent, AgentState, InventoryResult } from "./types.ts";
+import type { Agent, AgentState, InventoryResult, ParentRef } from "./types.ts";
 
 /** States in which cc.nvim is mid-turn and a new prompt must not be queued. */
 export const BUSY_STATES: readonly AgentState[] = ["working", "waiting", "interrupting"];
@@ -27,8 +29,14 @@ export interface ControlDependencies {
   lastMessage?: typeof getCcLastAssistantMessage;
   close?: typeof closeCcInstance;
   interrupt?: typeof interruptCcInstance;
-  detach?: typeof detachCcInstance;
   callerContext?: () => Promise<CallerContext>;
+  link?: LinkDependencies;
+  /** Where a link that could not be made is reported; defaults to stderr. */
+  warn?: (message: string) => void;
+}
+
+function defaultWarn(message: string): void {
+  console.error(`agents: warning: ${message}`);
 }
 
 /** Who a new or re-engaged agent reports to: the resolved caller, nobody, or an explicit agent key. */
@@ -41,7 +49,7 @@ export function parseFrom(value: string | undefined): FromSpec {
   throw new Error(`invalid value for 'from=': expected auto, none, or an agent key, got '${value}'`);
 }
 
-export interface NewAgentOptions extends Omit<CcOpenOptions, "cwd" | "delegator"> {
+export interface NewAgentOptions extends Omit<CcOpenOptions, "cwd"> {
   socket: string;
   cwd: string;
   from?: FromSpec;
@@ -101,7 +109,7 @@ function isDirectory(path: string): boolean {
 async function parentForNew(
   from: FromSpec,
   dependencies: Partial<Pick<ControlDependencies, "inventory" | "callerContext">>,
-): Promise<CcDelegator | undefined> {
+): Promise<ParentRef | undefined> {
   if (from === "none" || !dependencies.inventory) return undefined;
   let agents: Agent[];
   try {
@@ -111,44 +119,52 @@ async function parentForNew(
     return undefined;
   }
   const parent = await resolveParent(from, agents, dependencies);
-  return parent ? toDelegator(parent) : undefined;
+  return parent ? parentRefOf(parent) : undefined;
 }
 
 /**
- * Open a new cc.nvim instance and return its agent key. The parent is passed
- * into cc.open so cc.nvim records the link before the first prompt is sent;
- * linking afterwards would race a fast child.
+ * Open a new cc.nvim instance and return its agent key. With a parent, the
+ * child is registered in the parent's Neovim and a forwarder is installed in
+ * its own, which then pushes the child's current state once, so a turn that
+ * started (or even finished) since open is covered. A link that cannot be
+ * made is a warning, never a failed spawn.
  */
 export async function newAgent(
   options: NewAgentOptions,
-  dependencies: Partial<Pick<ControlDependencies, "open" | "inventory" | "callerContext">> = {},
+  dependencies: Partial<Pick<ControlDependencies, "open" | "inventory" | "callerContext" | "link" | "warn">> = {},
 ): Promise<string> {
   const cwd = resolve(options.cwd);
   if (!isDirectory(cwd)) throw new Error(`cwd is not a directory: ${options.cwd}`);
   if (!existsSync(options.socket)) throw new Error(`socket not found: ${options.socket}`);
   const { socket, cwd: _ignored, from = "auto", ...rest } = options;
-  const delegator = await parentForNew(from, dependencies);
-  const result = await (dependencies.open ?? openCcInstance)(socket, { ...rest, cwd, ...(delegator ? { delegator } : {}) });
+  const parent = await parentForNew(from, dependencies);
+  const result = await (dependencies.open ?? openCcInstance)(socket, { ...rest, cwd });
   if (!result.ok || result.bufnr === undefined || result.pid === undefined) {
     throw new Error(result.error || "cc.nvim open failed");
   }
-  return `${result.pid}:${result.bufnr}`;
+  const key = `${result.pid}:${result.bufnr}`;
+  if (parent) {
+    const child = { key, socket, bufnr: result.bufnr, nvimPid: result.pid, sessionId: null, state: "starting" as const };
+    for (const warning of await linkChild(parent, child, dependencies.link)) (dependencies.warn ?? defaultWarn)(warning);
+  }
+  return key;
 }
 
 /**
- * The parent `agents send` offers the target: only when the target has no
- * owner yet, and never itself or one of its own ancestors.
+ * The parent `agents send` links the target to: its existing owner, so the
+ * forwarder is checked before the turn starts, or else the resolved caller,
+ * never the target itself or one of its own descendants.
  */
 export async function parentForSend(
   target: Agent,
   agents: Agent[],
   from: FromSpec,
   dependencies: Pick<ControlDependencies, "callerContext">,
-): Promise<CcDelegator | undefined> {
-  if (target.delegator) return undefined;
+): Promise<ParentRef | undefined> {
+  if (target.delegator) return target.delegator;
   const parent = await resolveParent(from, agents, dependencies);
   if (!parent || parent.key === target.key || wouldCycle(agents, parent.key, target.key)) return undefined;
-  return toDelegator(parent);
+  return parentRefOf(parent);
 }
 
 export async function sendToAgent(
@@ -161,11 +177,13 @@ export async function sendToAgent(
   const agent = agents.find((candidate) => candidate.key === key);
   if (!agent) throw new AgentNotFoundError(key);
   if (BUSY_STATES.includes(agent.state)) throw new AgentBusyError(agent);
-  const delegator = await parentForSend(agent, agents, from, dependencies);
-  const send = dependencies.send ?? sendCcPrompt;
-  const result = delegator
-    ? await send(agent.socketPath, agent.outputBufnr, text, undefined, undefined, delegator)
-    : await send(agent.socketPath, agent.outputBufnr, text);
+  const parent = await parentForSend(agent, agents, from, dependencies);
+  // Link (or re-check the forwarder) before sending, so the turn this send
+  // starts is pushed to the parent.
+  if (parent) {
+    for (const warning of await linkChild(parent, childRefOf(agent), dependencies.link)) (dependencies.warn ?? defaultWarn)(warning);
+  }
+  const result = await (dependencies.send ?? sendCcPrompt)(agent.socketPath, agent.outputBufnr, text);
   if (!result.ok) throw new Error(result.error || "cc.nvim send_prompt failed");
   return agent;
 }
@@ -201,11 +219,23 @@ export async function closeAgent(key: string, dependencies: ControlDependencies)
   return agent;
 }
 
-/** Release an agent's link to its parent, so its turns no longer count there. */
+/**
+ * Release an agent from its parent: remove its forwarders and the registry
+ * entry in its own Neovim, and drop it from every parent that lists it.
+ */
 export async function detachAgent(key: string, dependencies: ControlDependencies): Promise<Agent> {
-  const agent = await findAgent(key, dependencies);
-  if (!agent.delegator) throw new Error(`agent ${key} has no parent to detach from`);
-  const result = await (dependencies.detach ?? detachCcInstance)(agent.socketPath, agent.outputBufnr);
-  if (!result.ok) throw new Error(result.error || "cc.nvim detach failed");
+  const { agents } = await dependencies.inventory();
+  const agent = agents.find((candidate) => candidate.key === key);
+  if (!agent) throw new AgentNotFoundError(key);
+  const parents = agents.filter((candidate) => candidate.children.some((entry) => entry.key === key));
+  if (!agent.delegator && parents.length === 0) throw new Error(`agent ${key} has no parent to detach from`);
+  const errors: string[] = [];
+  const removed = await (dependencies.link?.uninstall ?? uninstallForwarder)(agent.socketPath, agent.outputBufnr);
+  if (!removed.ok) errors.push(`forwarder: ${removed.error || "uninstall failed"}`);
+  for (const parent of parents) {
+    const result = await (dependencies.link?.unregister ?? unregisterCcDelegate)(parent.socketPath, parent.outputBufnr, key);
+    if (!result.ok) errors.push(`${parent.key}: ${result.error || "unregister failed"}`);
+  }
+  if (errors.length) throw new Error(`detach incomplete: ${errors.join("; ")}`);
   return agent;
 }

@@ -11,7 +11,7 @@ const snapshot = (overrides: Partial<CcInstanceSnapshot> = {}): CcInstanceSnapsh
   outputBufnr: 4, promptBufnr: 5, sessionId: "s", name: "n", provider: "claude",
   model: "opus", cwd: `${homedir()}/src/openspace-a/web`, pid: 90,
   state: "ready", turnElapsedMs: null, backgroundTaskCount: 0,
-  lastModifiedAt: 1_700_000_000_000, delegateCount: 0, children: [], delegator: null, ...overrides,
+  lastModifiedAt: 1_700_000_000_000, delegateCount: 0, children: [], ...overrides,
 });
 
 test("project labels use the first ~/src component and basename elsewhere", () => {

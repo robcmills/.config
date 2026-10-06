@@ -28,10 +28,8 @@ export interface CcInstanceSnapshot {
   lastModifiedAt: number | null;
   /** Linked child agents that are busy; counts even when another state wins. */
   delegateCount: number;
-  /** Children linked to this agent, as it last heard from them. */
+  /** Children registered with this agent, as it last heard from them. */
   children: DelegateChild[];
-  /** The agent this one reports to, or null when unlinked. */
-  delegator: DelegatorRef | null;
 }
 
 export interface DelegateChild {
@@ -39,15 +37,25 @@ export interface DelegateChild {
   sessionId: string | null;
   state: AgentState;
   nvimPid: number | null;
-  /** cc.nvim's per-instance link id; identifies the exact child incarnation. */
-  uid: string | null;
 }
 
-export interface DelegatorRef {
+/** A parent agent's address, as a forwarder records it. */
+export interface ParentRef {
   key: string;
+  socket: string;
+  bufnr: number;
   sessionId: string | null;
-  socket: string | null;
-  bufnr: number | null;
+}
+
+/** A forwarder installed in a child's Neovim, from that Neovim's registry. */
+export interface ForwarderRecord {
+  name: string;
+  parent: ParentRef;
+  childBufnr: number;
+  childKey: string;
+  /** The child's Neovim, filled in by the inventory. */
+  nvimPid: number;
+  socketPath: string;
 }
 
 export interface TmuxPane {
@@ -71,6 +79,8 @@ export interface NvimInstance {
 
 export interface Agent extends CcInstanceSnapshot {
   key: string;
+  /** The parent that owns this agent, from its forwarder or a parent's children; null when unlinked. */
+  delegator: ParentRef | null;
   project: string;
   nvimPid: number;
   socketPath: string;
@@ -103,4 +113,6 @@ export type CommandRunner = (args: string[], timeoutMs?: number) => Promise<Comm
 export interface InventoryResult {
   agents: Agent[];
   warnings: string[];
+  /** Forwarders found in the Neovims that answered. */
+  forwarders?: ForwarderRecord[];
 }

@@ -27,10 +27,12 @@ const HELP = `Usage:
              [focus=true|false] [from=auto|none|<key>]
                          Open a cc.nvim instance in that Neovim; prints its key.
                          from= picks its parent: auto (default) links it to the
-                         agent running this command, if any
+                         agent running this command, if any. Warns when the
+                         link cannot be tracked
   agents send key=<k> prompt=<text>|prompt-file=<path> [from=auto|none|<key>]
                          Queue a prompt; refuses while the agent is mid-turn.
-                         Links an unlinked agent to from= (default: the caller)
+                         Links an unlinked agent to from= (default: the caller);
+                         a linked one keeps its parent
   agents tail key=<k> [n=<lines>]
                          Print the agent's last assistant message
   agents interrupt key=<k>
@@ -43,10 +45,14 @@ Keys are <nvim-pid>:<output-bufnr>, as printed by \`agents\`.
 
 Delegation: an agent with a linked child that is busy (starting, working,
 waiting, interrupting, monitoring, or itself delegating) shows \`delegating\`.
-Links persist across idle turns until detach or close. Each child has one
-parent. Every inventory repairs stale links: it asks children to re-push
-their state, prunes children whose Neovim is dead or no longer has them, and
-re-points children whose parent session moved to another Neovim.`;
+The parent's cc.nvim owns the link: \`new\` and \`send\` register the child
+there and install a forwarder in the child's Neovim, an autocmd on
+CcStateChanged that pushes the child's state to the parent. The child needs
+no delegation code. Links persist across idle turns until detach or close.
+Each child has one parent. Every inventory repairs stale links: it re-pushes
+stale states, reinstalls missing forwarders, prunes children whose Neovim is
+dead or no longer has them, and rebuilds a restarted parent's links from the
+children's forwarders by session id.`;
 
 function stderr(message: string) {
   console.error(`agents: ${message}`);

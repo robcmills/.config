@@ -2,7 +2,7 @@ import { basename, relative, sep } from "node:path";
 import { homedir } from "node:os";
 import { queryCcInstances } from "./cc-rpc.ts";
 import { reconcileDelegations } from "./delegation.ts";
-import type { ReconcileDependencies } from "./delegation.ts";
+import type { LinkDependencies } from "./delegation.ts";
 import { dedupeNeovimInstances, discoverNeovimInstances } from "./discover-neovim.ts";
 import { correlatePane, discoverProcessParents, discoverTmuxPanes } from "./discover-tmux.ts";
 import { createAgentComparator, validateConfig } from "./sort.ts";
@@ -10,6 +10,7 @@ import type {
   Agent,
   AgentsConfig,
   CcInstanceSnapshot,
+  ForwarderRecord,
   InventoryResult,
   NvimInstance,
   TmuxPane,
@@ -34,6 +35,7 @@ export function mergeSnapshots(
     .map((snapshot) => ({
       ...snapshot,
       key: `${nvim.pid}:${snapshot.outputBufnr}`,
+      delegator: null,
       project: projectFromCwd(snapshot.cwd),
       nvimPid: nvim.pid,
       socketPath: nvim.socketPath,
@@ -54,8 +56,12 @@ export interface InventoryDependencies {
   discoverNeovim?: () => Promise<NvimInstance[]>;
   discoverTmux?: () => Promise<TmuxPane[]>;
   discoverParents?: () => Promise<Map<number, number>>;
-  queryCc?: (socketPath: string) => Promise<{ snapshots: CcInstanceSnapshot[] | null; error?: string }>;
-  reconcile?: ReconcileDependencies & { alive?: (pid: number) => boolean };
+  queryCc?: (socketPath: string) => Promise<{
+    snapshots: CcInstanceSnapshot[] | null;
+    forwarders?: Omit<ForwarderRecord, "nvimPid" | "socketPath">[];
+    error?: string;
+  }>;
+  reconcile?: LinkDependencies & { alive?: (pid: number) => boolean };
 }
 
 export async function buildInventory(
@@ -73,6 +79,7 @@ export async function buildInventory(
   const nvims = dedupeNeovimInstances(rawNvim);
   const warnings: string[] = [];
   const answered = new Set<number>();
+  const forwarders: ForwarderRecord[] = [];
   const batches = await Promise.all(nvims.map(async (nvim) => {
     const pane = correlatePane(nvim.pid, nvim.cwd, panes, parents);
     if (nvim.state === "wedged") {
@@ -89,12 +96,13 @@ export async function buildInventory(
       return [];
     }
     answered.add(nvim.pid);
+    for (const record of result.forwarders ?? []) forwarders.push({ ...record, nvimPid: nvim.pid, socketPath: nvim.socketPath });
     return mergeSnapshots(nvim, result.snapshots, pane);
   }));
   const agents = batches.flat();
   // Every inventory repairs parent/child links it can see are stale.
-  warnings.push(...await reconcileDelegations(agents, answered, dependencies.reconcile));
+  warnings.push(...await reconcileDelegations(agents, forwarders, answered, dependencies.reconcile));
   agents.sort(createAgentComparator(config));
   warnings.sort();
-  return { agents, warnings };
+  return { agents, warnings, forwarders };
 }
