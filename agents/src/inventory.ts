@@ -106,3 +106,18 @@ export async function buildInventory(
   warnings.sort();
   return { agents, warnings, forwarders };
 }
+
+/**
+ * Repair delegation links without the tmux discovery a full inventory does,
+ * for callers that only want the repair (cc.nvim instances coming up).
+ */
+export async function reconcileOnly(
+  rawConfig: AgentsConfig,
+  dependencies: InventoryDependencies = {},
+): Promise<InventoryResult> {
+  return buildInventory(rawConfig, {
+    ...dependencies,
+    discoverTmux: async () => [],
+    discoverParents: async () => new Map(),
+  });
+}

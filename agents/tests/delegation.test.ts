@@ -105,6 +105,32 @@ describe("counts and delegators", () => {
     expect(agents[0]!.delegateCount).toBe(1);
   });
 
+  test("a restarted parent is relinked and the returned delegator is the new one", async () => {
+    // Session P moved from Neovim 10 (dead) to 11:3; the child still forwards to 10:1.
+    const moved = parent([], { key: "11:3", nvimPid: 11, outputBufnr: 3, socketPath: "/nvim.11", state: "ready" });
+    const agents = [moved, child()];
+    const ok = async () => ({ ok: true });
+    expect(await reconcileDelegations(agents, [forwarder()], new Set([11, 20]), { alive, register: ok, install: ok })).toEqual([]);
+    expect(agents[0]!.state).toBe("delegating");
+    expect(agents[1]!.delegator?.key).toBe("11:3");
+  });
+
+  test("a failed relink leaves the delegator as found", async () => {
+    const moved = parent([], { key: "11:3", nvimPid: 11, outputBufnr: 3, socketPath: "/nvim.11" });
+    const agents = [moved, child()];
+    const warnings = await reconcileDelegations(agents, [forwarder()], new Set([11, 20]), {
+      alive, register: async () => ({ ok: true }), install: async () => ({ ok: false, error: "boom" }),
+    });
+    expect(warnings).toHaveLength(1);
+    expect(agents[1]!.delegator?.key).toBe("10:1");
+  });
+
+  test("a pruned registration no longer names the parent as delegator", async () => {
+    const agents = [parent([entry({ sessionId: "OLD" })]), child()];
+    await reconcileDelegations(agents, [], new Set([10, 20]), { alive, unregister: async () => ({ ok: true }) });
+    expect(agents[1]!.delegator).toBeNull();
+  });
+
   test("an inventory without links makes no RPCs", async () => {
     const agents = [agent()];
     expect(await reconcileDelegations(agents, [], new Set([100]), { install: async () => { throw new Error("no"); } })).toEqual([]);

@@ -5,7 +5,7 @@ import {
   closeAgent, detachAgent, interruptAgent, KEY_PATTERN, newAgent, parseFrom, sendToAgent, tailAgent,
 } from "./control.ts";
 import { formatTsv } from "./format.ts";
-import { buildInventory } from "./inventory.ts";
+import { buildInventory, reconcileOnly } from "./inventory.ts";
 import { formatPickerLines, pickAgent, PICKER_ROWS_FLAG } from "./picker.ts";
 import { validateConfig } from "./sort.ts";
 import { emptyInventoryWarningNotification, focusAndSwitch, notifyTmux } from "./switch.ts";
@@ -20,6 +20,8 @@ const HELP = `Usage:
   agents switch <key>    Switch directly to one live agent
   agents switch key=<k>  Same, named form
   agents doctor          Print complete inventory diagnostics
+  agents reconcile       Repair delegation links only, skipping tmux discovery;
+                         prints nothing but warnings
   agents --help          Show this help
 
   agents new socket=<path> cwd=<dir> [prompt=<text>|prompt-file=<path>]
@@ -49,16 +51,17 @@ The parent's cc.nvim owns the link: \`new\` and \`send\` register the child
 there and install a forwarder in the child's Neovim, an autocmd on
 CcStateChanged that pushes the child's state to the parent. The child needs
 no delegation code. Links persist across idle turns until detach or close.
-Each child has one parent. Every inventory repairs stale links: it re-pushes
-stale states, reinstalls missing forwarders, prunes children whose Neovim is
-dead or no longer has them, and rebuilds a restarted parent's links from the
-children's forwarders by session id.`;
+Each child has one parent. Every inventory, and \`reconcile\`, repairs stale
+links: it re-pushes stale states, reinstalls missing forwarders, prunes
+children whose Neovim is dead or no longer has them, and rebuilds a restarted
+parent's links from the children's forwarders by session id. Neovim runs
+\`reconcile\` when a cc.nvim instance starts or resumes.`;
 
 function stderr(message: string) {
   console.error(`agents: ${message}`);
 }
 
-async function inventory(emitWarnings = true): Promise<InventoryResult> {
+async function inventory(emitWarnings = true, build = buildInventory): Promise<InventoryResult> {
   let config;
   try {
     const configSource = (await import("../config.ts")).default as unknown;
@@ -66,7 +69,7 @@ async function inventory(emitWarnings = true): Promise<InventoryResult> {
   } catch (error) {
     throw new Error(`invalid config: ${error instanceof Error ? error.message : String(error)}`);
   }
-  const result = await buildInventory(config);
+  const result = await build(config);
   if (emitWarnings) {
     for (const warning of result.warnings) stderr(`warning: ${warning}`);
   }
@@ -110,6 +113,10 @@ async function run(args: string[]): Promise<number> {
   }
   if (args.length === 1 && args[0] === "doctor") {
     printDoctor(await inventory(false));
+    return 0;
+  }
+  if (args.length === 1 && args[0] === "reconcile") {
+    await inventory(true, reconcileOnly);
     return 0;
   }
   if (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) {

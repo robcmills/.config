@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { homedir } from "node:os";
-import { buildInventory, projectFromCwd } from "../src/inventory.ts";
+import { buildInventory, projectFromCwd, reconcileOnly } from "../src/inventory.ts";
 import type { AgentsConfig, CcInstanceSnapshot } from "../src/types.ts";
 
 const config: AgentsConfig = {
@@ -46,5 +46,33 @@ describe("inventory merge", () => {
     });
     expect(result.agents).toEqual([]);
     expect(result.warnings[0]).toContain("bad JSON");
+  });
+
+  test("reconcileOnly skips tmux discovery but still relinks a restarted parent", async () => {
+    const calls: string[] = [];
+    const parentRef = { key: "10:1", socket: "/nvim.10.0", bufnr: 1, sessionId: "P" };
+    const result = await reconcileOnly(config, {
+      discoverNeovim: async () => [
+        { socketPath: "/nvim.11.0", pid: 11, cwd: "/x", state: "responsive" },
+        { socketPath: "/nvim.20.0", pid: 20, cwd: "/x", state: "responsive" },
+      ],
+      discoverTmux: async () => { throw new Error("tmux discovery ran"); },
+      discoverParents: async () => { throw new Error("parent discovery ran"); },
+      queryCc: async (socket) => socket === "/nvim.11.0"
+        ? { snapshots: [snapshot({ outputBufnr: 3, sessionId: "P" })] }
+        : {
+          snapshots: [snapshot({ outputBufnr: 5, sessionId: "C", state: "working" })],
+          forwarders: [{ name: "f", parent: parentRef, childBufnr: 5, childKey: "20:5" }],
+        },
+      reconcile: {
+        alive: () => false,
+        register: async (socket) => { calls.push(`register ${socket}`); return { ok: true }; },
+        install: async (socket) => { calls.push(`install ${socket}`); return { ok: true }; },
+      },
+    });
+    expect(calls).toEqual(["register /nvim.11.0", "install /nvim.20.0"]);
+    const byKey = new Map(result.agents.map((a) => [a.key, a]));
+    expect(byKey.get("11:3")?.state).toBe("delegating");
+    expect(byKey.get("20:5")?.delegator?.key).toBe("11:3");
   });
 });

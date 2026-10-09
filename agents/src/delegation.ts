@@ -33,20 +33,38 @@ function sessionsDiffer(left: string | null | undefined, right: string | null | 
 
 /**
  * Fill each agent's `delegator`: the parent its forwarder points at, else a
- * parent whose children list it.
+ * parent whose children list it. `applied` are corrections that succeeded,
+ * so the result shows the links as repaired rather than as found.
  */
-export function deriveDelegators(agents: Agent[], forwarders: ForwarderRecord[]): void {
+export function deriveDelegators(agents: Agent[], forwarders: ForwarderRecord[], applied: Correction[] = []): void {
   const byKey = new Map(agents.map((agent) => [agent.key, agent] as const));
-  for (const agent of agents) agent.delegator = null;
+  const forwardedTo = new Map<string, ParentRef>();
   for (const record of forwarders) {
-    const child = byKey.get(record.childKey);
-    if (child && !child.delegator) child.delegator = record.parent;
+    if (!forwardedTo.has(record.childKey)) forwardedTo.set(record.childKey, record.parent);
   }
+  const unregistered = new Set<string>();
+  const registered: Correction[] = [];
+  for (const correction of applied) {
+    if (correction.kind === "uninstall" && forwardedTo.get(correction.childKey)?.key === correction.parentKey) {
+      forwardedTo.delete(correction.childKey);
+    } else if (correction.kind === "unregister") unregistered.add(`${correction.parent.key}>${correction.childKey}`);
+    else if (correction.kind === "register") registered.push(correction);
+  }
+  // A child has one forwarder, so an install replaces whatever it pointed at.
+  for (const correction of applied) {
+    if (correction.kind === "install") forwardedTo.set(correction.child.key, correction.parent);
+  }
+  for (const agent of agents) agent.delegator = forwardedTo.get(agent.key) ?? null;
   for (const parent of agents) {
     for (const entry of parent.children) {
       const child = byKey.get(entry.key);
-      if (child && !child.delegator) child.delegator = parentRefOf(parent);
+      if (child && !child.delegator && !unregistered.has(`${parent.key}>${entry.key}`)) child.delegator = parentRefOf(parent);
     }
+  }
+  for (const correction of registered) {
+    if (correction.kind !== "register") continue;
+    const child = byKey.get(correction.child.key);
+    if (child && !child.delegator) child.delegator = correction.parent;
   }
 }
 
@@ -184,7 +202,8 @@ export function planReconciliation({ agents, forwarders, answered, alive }: Reco
  * The parent's busy-child count as the inventory sees it: a child's real
  * state when it is visible, the parent's cached state when it cannot be
  * checked, and nothing for an entry the plan prunes. A child whose
- * forwarder points at the parent but whose registration was lost counts too.
+ * forwarder points at the parent but whose registration was lost counts too,
+ * as does one the plan registers, such as a restarted parent's child.
  */
 export function correctedDelegateCounts(agents: Agent[], forwarders: ForwarderRecord[], corrections: Correction[]): Map<string, number> {
   const byKey = new Map(agents.map((agent) => [agent.key, agent] as const));
@@ -205,6 +224,11 @@ export function correctedDelegateCounts(agents: Agent[], forwarders: ForwarderRe
       const child = byKey.get(record.childKey);
       counted.add(record.childKey);
       if (child && DELEGATE_BUSY_STATES.has(child.state)) count += 1;
+    }
+    for (const correction of corrections) {
+      if (correction.kind !== "register" || correction.parent.key !== parent.key || counted.has(correction.child.key)) continue;
+      counted.add(correction.child.key);
+      if (DELEGATE_BUSY_STATES.has(correction.child.state)) count += 1;
     }
     counts.set(parent.key, count);
   }
@@ -228,10 +252,12 @@ export function applyCorrectedCounts(agents: Agent[], counts: Map<string, number
 
 /**
  * Send every correction. Registrations and removals go first, then forwarder
- * installs, so each install's push reaches a registered entry. Returns a
- * warning for each that failed.
+ * installs, so each install's push reaches a registered entry. Returns the
+ * corrections that succeeded and a warning for each that failed.
  */
-export async function applyCorrections(corrections: Correction[], dependencies: LinkDependencies = {}): Promise<string[]> {
+async function sendCorrections(corrections: Correction[], dependencies: LinkDependencies): Promise<{ applied: Correction[]; warnings: string[] }> {
+  const applied: Correction[] = [];
+  const warnings: string[] = [];
   const run = async (correction: Correction) => {
     const result = correction.kind === "register"
       ? await (dependencies.register ?? registerCcDelegate)(correction.parent.socket, correction.parent.bufnr, correction.child)
@@ -243,9 +269,21 @@ export async function applyCorrections(corrections: Correction[], dependencies: 
     const target = correction.kind === "uninstall" ? correction.childKey : correction.kind === "unregister" ? correction.parent.key : correction.kind === "register" ? correction.parent.key : correction.child.key;
     return result.ok ? null : `delegation ${correction.kind} for ${target} failed (${correction.reason}): ${result.error || "unknown error"}`;
   };
-  const first = await Promise.all(corrections.filter((c) => c.kind !== "install").map(run));
-  const second = await Promise.all(corrections.filter((c) => c.kind === "install").map(run));
-  return [...first, ...second].filter((warning): warning is string => warning !== null);
+  const phase = async (batch: Correction[]) => {
+    const results = await Promise.all(batch.map(run));
+    results.forEach((warning, index) => {
+      if (warning === null) applied.push(batch[index]!);
+      else warnings.push(warning);
+    });
+  };
+  await phase(corrections.filter((c) => c.kind !== "install"));
+  await phase(corrections.filter((c) => c.kind === "install"));
+  return { applied, warnings };
+}
+
+/** Send every correction (see sendCorrections). Returns a warning for each that failed. */
+export async function applyCorrections(corrections: Correction[], dependencies: LinkDependencies = {}): Promise<string[]> {
+  return (await sendCorrections(corrections, dependencies)).warnings;
 }
 
 /** `kill -0`: false only when the process is known not to exist. */
@@ -258,18 +296,23 @@ export function processAlive(pid: number): boolean {
   }
 }
 
-/** Derive delegators, plan and send repairs, and fold corrected counts into `agents`. Returns warnings. */
+/**
+ * Plan and send repairs, fold corrected counts into `agents`, and derive
+ * each agent's delegator from the links as repaired. Returns warnings.
+ */
 export async function reconcileDelegations(
   agents: Agent[],
   forwarders: ForwarderRecord[],
   answered: ReadonlySet<number>,
   dependencies: LinkDependencies & { alive?: (pid: number) => boolean } = {},
 ): Promise<string[]> {
+  // Planning walks delegators (wouldCycle), so derive them as found first.
   deriveDelegators(agents, forwarders);
   if (forwarders.length === 0 && !agents.some((agent) => agent.children.length > 0)) return [];
   const corrections = planReconciliation({ agents, forwarders, answered, alive: dependencies.alive ?? processAlive });
   const counts = correctedDelegateCounts(agents, forwarders, corrections);
-  const warnings = corrections.length ? await applyCorrections(corrections, dependencies) : [];
+  const { applied, warnings } = corrections.length ? await sendCorrections(corrections, dependencies) : { applied: [], warnings: [] };
   applyCorrectedCounts(agents, counts);
+  if (applied.length) deriveDelegators(agents, forwarders, applied);
   return warnings;
 }
