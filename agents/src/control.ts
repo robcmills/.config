@@ -150,21 +150,33 @@ export async function newAgent(
   return key;
 }
 
+/** Where `agents send` links its target, and the parent it leaves, if any. */
+export interface SendLink {
+  parent: ParentRef;
+  previous?: ParentRef;
+}
+
 /**
- * The parent `agents send` links the target to: its existing owner, so the
- * forwarder is checked before the turn starts, or else the resolved caller,
- * never the target itself or one of its own descendants.
+ * The parent `agents send` links the target to: the resolved caller (or the
+ * `from=` key) when that is a live agent other than the target's current
+ * parent, so a follow-up from a new session moves the target under it.
+ * Otherwise the current parent, whose forwarder is re-checked before the
+ * turn starts: with `from=none`, when the caller cannot be resolved, or when
+ * linking would make the target its own ancestor.
  */
 export async function parentForSend(
   target: Agent,
   agents: Agent[],
   from: FromSpec,
   dependencies: Pick<ControlDependencies, "callerContext">,
-): Promise<ParentRef | undefined> {
-  if (target.delegator) return target.delegator;
+): Promise<SendLink | undefined> {
+  const current = target.delegator ?? undefined;
   const parent = await resolveParent(from, agents, dependencies);
-  if (!parent || parent.key === target.key || wouldCycle(agents, parent.key, target.key)) return undefined;
-  return parentRefOf(parent);
+  if (!parent || parent.key === target.key || wouldCycle(agents, parent.key, target.key)) {
+    return current && { parent: current };
+  }
+  if (current?.key === parent.key) return { parent: parentRefOf(parent) };
+  return { parent: parentRefOf(parent), previous: current };
 }
 
 export async function sendToAgent(
@@ -177,11 +189,22 @@ export async function sendToAgent(
   const agent = agents.find((candidate) => candidate.key === key);
   if (!agent) throw new AgentNotFoundError(key);
   if (BUSY_STATES.includes(agent.state)) throw new AgentBusyError(agent);
-  const parent = await parentForSend(agent, agents, from, dependencies);
+  const link = await parentForSend(agent, agents, from, dependencies);
   // Link (or re-check the forwarder) before sending, so the turn this send
   // starts is pushed to the parent.
-  if (parent) {
-    for (const warning of await linkChild(parent, childRefOf(agent), dependencies.link)) (dependencies.warn ?? defaultWarn)(warning);
+  if (link) {
+    const warn = dependencies.warn ?? defaultWarn;
+    const warnings = await linkChild(link.parent, childRefOf(agent), dependencies.link);
+    for (const warning of warnings) warn(warning);
+    // Installing the new forwarder replaced the old one; drop the target from
+    // the parents it left. If the link failed, the old parent keeps it.
+    if (link.previous && warnings.length === 0) {
+      for (const old of agents) {
+        if (old.key === link.parent.key || !old.children.some((entry) => entry.key === key)) continue;
+        const result = await (dependencies.link?.unregister ?? unregisterCcDelegate)(old.socketPath, old.outputBufnr, key);
+        if (!result.ok) warn(`${key} is still listed under ${old.key}: ${result.error || "unregister failed"}`);
+      }
+    }
   }
   const result = await (dependencies.send ?? sendCcPrompt)(agent.socketPath, agent.outputBufnr, text);
   if (!result.ok) throw new Error(result.error || "cc.nvim send_prompt failed");

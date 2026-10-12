@@ -122,7 +122,7 @@ describe("send", () => {
     expect(calls[0]).toEqual(["/tmp/nvim.100.0", 7, "hi there"]);
   });
 
-  test("links an unlinked target to the caller and keeps an existing owner, before sending", async () => {
+  test("links an unlinked target to the caller before sending", async () => {
     const calls: unknown[][] = [];
     const send = async () => { calls.push(["send"]); return { ok: true }; };
     const link = {
@@ -133,12 +133,83 @@ describe("send", () => {
     await sendToAgent("60:2", "go", { inventory: async () => ({ agents: [jarvis, worker], warnings: [] }), send, callerContext: fromJarvis, link });
     expect(calls.map((call) => call[0])).toEqual(["register", "install", "send"]);
     expect(calls[0]![1]).toBe("/nvim.50");
-    calls.length = 0;
-    const owner = { key: "70:1", socket: "/nvim.70", bufnr: 1, sessionId: null };
-    const owned = { ...worker, delegator: owner };
-    await sendToAgent("60:2", "go", { inventory: async () => ({ agents: [jarvis, owned], warnings: [] }), send, callerContext: fromJarvis, link });
-    expect(calls[0]).toEqual(["register", "/nvim.70", 1, expect.objectContaining({ key: "60:2" })]);
-    expect(calls[1]![4]).toEqual(owner);
+  });
+
+  describe("re-parenting", () => {
+    const owner = agent({ key: "70:1", nvimPid: 70, outputBufnr: 1, socketPath: "/nvim.70", pid: 500, sessionId: "O" });
+    const ownerRef = { key: "70:1", socket: "/nvim.70", bufnr: 1, sessionId: "O" };
+    const owned = agent({ key: "60:2", nvimPid: 60, outputBufnr: 2, socketPath: "/nvim.60", delegator: ownerRef });
+    const oldBoss = { ...owner, children: [{ key: "60:2", sessionId: null, state: "ready" as const, nvimPid: 60 }] };
+    const recorder = () => {
+      const calls: unknown[][] = [];
+      const record = (name: string) => async (...args: unknown[]) => { calls.push([name, ...args]); return { ok: true }; };
+      return {
+        calls,
+        send: record("send"),
+        link: { register: record("register"), install: record("install"), unregister: record("unregister") },
+      };
+    };
+
+    test("moves a target owned by another agent under the caller and drops it from the old parent", async () => {
+      const { calls, send, link } = recorder();
+      await sendToAgent("60:2", "go", { inventory: async () => ({ agents: [jarvis, oldBoss, owned], warnings: [] }), send, callerContext: fromJarvis, link });
+      expect(calls.map((call) => [call[0], call[1]])).toEqual([
+        ["register", "/nvim.50"], ["install", "/nvim.60"], ["unregister", "/nvim.70"], ["send", "/nvim.60"],
+      ]);
+      expect(calls[1]![4]).toEqual(expect.objectContaining({ key: "50:1" }));
+      expect(calls[2]![3]).toBe("60:2");
+    });
+
+    test("keeps the old parent when the new link fails", async () => {
+      const { calls, send, link } = recorder();
+      const warnings: string[] = [];
+      await sendToAgent("60:2", "go", {
+        inventory: async () => ({ agents: [jarvis, oldBoss, owned], warnings: [] }), send, callerContext: fromJarvis,
+        link: { ...link, install: async () => ({ ok: false, error: "boom" }) }, warn: (message) => warnings.push(message),
+      });
+      expect(calls.map((call) => call[0])).toEqual(["register", "unregister", "send"]);
+      // The only unregister is linkChild's rollback from the new parent.
+      expect(calls[1]![1]).toBe("/nvim.50");
+      expect(warnings).toHaveLength(1);
+    });
+
+    test("is a no-op when the caller already owns the target", async () => {
+      const { calls, send, link } = recorder();
+      const mine = { ...owned, delegator: { key: "50:1", socket: "/nvim.50", bufnr: 1, sessionId: "J" } };
+      const boss = { ...jarvis, children: [{ key: "60:2", sessionId: null, state: "ready" as const, nvimPid: 60 }] };
+      await sendToAgent("60:2", "go", { inventory: async () => ({ agents: [boss, mine], warnings: [] }), send, callerContext: fromJarvis, link });
+      expect(calls.map((call) => [call[0], call[1]])).toEqual([["register", "/nvim.50"], ["install", "/nvim.60"], ["send", "/nvim.60"]]);
+    });
+
+    test("from=none keeps the existing parent", async () => {
+      const { calls, send, link } = recorder();
+      await sendToAgent("60:2", "go", { inventory: async () => ({ agents: [jarvis, oldBoss, owned], warnings: [] }), send, callerContext: fromJarvis, link }, "none");
+      expect(calls.map((call) => [call[0], call[1]])).toEqual([["register", "/nvim.70"], ["install", "/nvim.60"], ["send", "/nvim.60"]]);
+      expect(calls[1]![4]).toEqual(ownerRef);
+    });
+
+    test("an unresolved caller keeps the existing parent", async () => {
+      const { calls, send, link } = recorder();
+      await sendToAgent("60:2", "go", { inventory: async () => ({ agents: [jarvis, oldBoss, owned], warnings: [] }), send, callerContext: shell, link });
+      expect(calls.map((call) => [call[0], call[1]])).toEqual([["register", "/nvim.70"], ["install", "/nvim.60"], ["send", "/nvim.60"]]);
+    });
+
+    test("an explicit from= key re-parents to that key", async () => {
+      const { calls, send, link } = recorder();
+      const other = agent({ key: "80:1", nvimPid: 80, outputBufnr: 1, socketPath: "/nvim.80" });
+      await sendToAgent("60:2", "go", { inventory: async () => ({ agents: [jarvis, oldBoss, owned, other], warnings: [] }), send, callerContext: fromJarvis, link }, { key: "80:1" });
+      expect(calls.map((call) => [call[0], call[1]])).toEqual([
+        ["register", "/nvim.80"], ["install", "/nvim.60"], ["unregister", "/nvim.70"], ["send", "/nvim.60"],
+      ]);
+    });
+
+    test("skips a re-parent that would make a cycle and keeps the existing parent", async () => {
+      const { calls, send, link } = recorder();
+      // Jarvis (the caller) is a child of 60:2, which is owned by 70:1.
+      const childJarvis = { ...jarvis, delegator: { key: "60:2", socket: "/nvim.60", bufnr: 2, sessionId: null } };
+      await sendToAgent("60:2", "go", { inventory: async () => ({ agents: [childJarvis, oldBoss, owned], warnings: [] }), send, callerContext: fromJarvis, link });
+      expect(calls.map((call) => [call[0], call[1]])).toEqual([["register", "/nvim.70"], ["install", "/nvim.60"], ["send", "/nvim.60"]]);
+    });
   });
 
   test("never links an agent to itself or to its own descendant", async () => {
