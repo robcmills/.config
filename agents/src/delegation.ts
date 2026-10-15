@@ -126,10 +126,44 @@ function nvimPidOfKey(key: string): number | null {
 }
 
 /**
+ * The agents holding each session id that more than one agent holds: one
+ * session open in two Neovims, as when a restart leaves the old tmux session
+ * running.
+ */
+function duplicateSessions(agents: Agent[]): Map<string, Agent[]> {
+  const holders = new Map<string, Agent[]>();
+  for (const agent of agents) {
+    if (agent.sessionId) holders.set(agent.sessionId, [...holders.get(agent.sessionId) ?? [], agent]);
+  }
+  for (const [sessionId, copies] of holders) if (copies.length < 2) holders.delete(sessionId);
+  return holders;
+}
+
+function hasLiveProcess(agent: Agent, alive: (pid: number) => boolean): boolean {
+  return agent.pid !== null && alive(agent.pid);
+}
+
+/**
+ * The copy of a duplicated session to keep links on: the one with a live
+ * Claude process, else among several the most recently active. Null when
+ * none has a live process or the newest two tie.
+ */
+export function copyToKeep(copies: Agent[], alive: (pid: number) => boolean): Agent | null {
+  const live = copies
+    .filter((copy) => hasLiveProcess(copy, alive))
+    .sort((left, right) => (right.lastModifiedAt ?? -Infinity) - (left.lastModifiedAt ?? -Infinity));
+  if (live.length === 0) return null;
+  if (live.length > 1 && (live[0]!.lastModifiedAt ?? null) === (live[1]!.lastModifiedAt ?? null)) return null;
+  return live[0]!;
+}
+
+/**
  * Compare each parent's children with the children's own snapshots and the
  * forwarders installed in their Neovims, and list the RPCs that repair the
  * difference. Prunes only on positive evidence: a dead Neovim pid, or a
  * Neovim that answered without the child. A wedged Neovim proves nothing.
+ * When a parent's session is open in several Neovims, links move to the copy
+ * `copyToKeep` picks.
  */
 export function planReconciliation({ agents, forwarders, answered, alive }: ReconcileInput): Correction[] {
   const byKey = new Map(agents.map((agent) => [agent.key, agent] as const));
@@ -139,6 +173,26 @@ export function planReconciliation({ agents, forwarders, answered, alive }: Reco
   };
   const forwarderTo = (child: Agent, parentKey: string) => forwarders.some((record) =>
     record.nvimPid === child.nvimPid && record.childBufnr === child.outputBufnr && record.parent.key === parentKey);
+  const duplicates = duplicateSessions(agents);
+  // The copy to keep for a duplicated session, excluding the child itself.
+  const keeperFor = (sessionId: string | null, child: Agent): Agent | null => {
+    const copies = sessionId ? duplicates.get(sessionId)?.filter((copy) => copy.key !== child.key) : undefined;
+    return copies && copies.length > 1 ? copyToKeep(copies, alive) : null;
+  };
+  const relink = (target: Agent, child: Agent, reason: string) => {
+    if (wouldCycle(agents, target.key, child.key)) return false;
+    const ref = parentRefOf(target);
+    const listed = target.children.some((entry) => entry.key === child.key);
+    if (!listed) add(`register:${target.key}>${child.key}`, { kind: "register", parent: ref, child: childRefOf(child), reason });
+    // Installing to the new parent replaces the stale forwarder (one parent per child)
+    // and pushes the child's state. A link already whole is left to the checks above.
+    if (!listed || !forwarderTo(child, target.key)) {
+      add(`install:${child.key}>${target.key}`, { kind: "install", parent: ref, child: childRefOf(child), reason });
+    }
+    return true;
+  };
+  const movedReason = (from: Agent, to: Agent) =>
+    `session ${shortSession(from.sessionId)} is open in ${from.key} and ${to.key}; keeping ${to.key}`;
 
   for (const parent of agents) {
     const ref = parentRefOf(parent);
@@ -153,6 +207,11 @@ export function planReconciliation({ agents, forwarders, answered, alive }: Reco
       }
       if (sessionsDiffer(entry.sessionId, child.sessionId)) {
         prune(`${entry.key} now holds another session`);
+        continue;
+      }
+      const keeper = keeperFor(parent.sessionId, child);
+      if (keeper && keeper.key !== parent.key) {
+        if (relink(keeper, child, movedReason(parent, keeper))) prune(movedReason(parent, keeper));
         continue;
       }
       if (!forwarderTo(child, parent.key)) {
@@ -174,6 +233,12 @@ export function planReconciliation({ agents, forwarders, answered, alive }: Reco
     }
     const parent = byKey.get(record.parent.key);
     if (parent && !sessionsDiffer(parent.sessionId, record.parent.sessionId)) {
+      const keeper = keeperFor(parent.sessionId, child);
+      if (keeper && keeper.key !== parent.key) {
+        // The old copy's registration, if any, is pruned in the loop above.
+        relink(keeper, child, movedReason(parent, keeper));
+        continue;
+      }
       if (!parent.children.some((entry) => entry.key === child.key)) {
         const ref = parentRefOf(parent);
         add(`register:${parent.key}>${child.key}`, { kind: "register", parent: ref, child: childRefOf(child), reason: `${parent.key} does not list ${child.key}` });
@@ -186,16 +251,31 @@ export function planReconciliation({ agents, forwarders, answered, alive }: Reco
     // restarted Neovim, rebuild the link there from this registry entry.
     if (!record.parent.sessionId) continue;
     const candidates = agents.filter((agent) => agent.sessionId === record.parent.sessionId && agent.key !== child.key);
-    if (candidates.length !== 1) continue;
-    const target = candidates[0]!;
-    if (wouldCycle(agents, target.key, child.key)) continue;
-    const ref = parentRefOf(target);
-    const reason = `${record.parent.key} is gone; session ${record.parent.sessionId} is now ${target.key}`;
-    add(`register:${target.key}>${child.key}`, { kind: "register", parent: ref, child: childRefOf(child), reason });
-    // Installing to the new parent replaces the stale forwarder (one parent per child).
-    add(`install:${child.key}>${target.key}`, { kind: "install", parent: ref, child: childRefOf(child), reason });
+    const target = candidates.length === 1 ? candidates[0]! : copyToKeep(candidates, alive);
+    if (!target) continue;
+    relink(target, child, `${record.parent.key} is gone; session ${record.parent.sessionId} is now ${target.key}`);
   }
   return [...corrections.values()];
+}
+
+function shortSession(sessionId: string | null): string {
+  return (sessionId ?? "").slice(0, 8);
+}
+
+/**
+ * One warning per session id held by more than one agent, naming the keys
+ * and which of them has a running Claude process.
+ */
+export function duplicateSessionWarnings(agents: Agent[], alive: (pid: number) => boolean = processAlive): string[] {
+  const list = (keys: string[]) => keys.length <= 2 ? keys.join(" and ") : `${keys.slice(0, -1).join(", ")}, and ${keys.at(-1)}`;
+  return [...duplicateSessions(agents)].map(([sessionId, copies]) => {
+    const keys = copies.map((copy) => copy.key).sort();
+    const running = copies.filter((copy) => hasLiveProcess(copy, alive)).map((copy) => copy.key).sort();
+    const owner = running.length === 0 ? "none has a running process"
+      : running.length === 1 ? `${running[0]} has the running process`
+        : `${list(running)} all have running processes`;
+    return `session ${shortSession(sessionId)} is open in ${list(keys)}; close one (${owner})`;
+  });
 }
 
 /**
@@ -203,11 +283,15 @@ export function planReconciliation({ agents, forwarders, answered, alive }: Reco
  * state when it is visible, the parent's cached state when it cannot be
  * checked, and nothing for an entry the plan prunes. A child whose
  * forwarder points at the parent but whose registration was lost counts too,
- * as does one the plan registers, such as a restarted parent's child.
+ * as does one the plan registers, such as a restarted parent's child,
+ * unless the plan moves that forwarder to another parent.
  */
 export function correctedDelegateCounts(agents: Agent[], forwarders: ForwarderRecord[], corrections: Correction[]): Map<string, number> {
   const byKey = new Map(agents.map((agent) => [agent.key, agent] as const));
   const pruned = new Set(corrections.flatMap((c) => c.kind === "unregister" ? [`${c.parent.key}>${c.childKey}`] : []));
+  // A forwarder being replaced by an install to another parent no longer counts for its old one.
+  const movedFrom = (record: ForwarderRecord) => corrections.some((c) =>
+    c.kind === "install" && c.child.key === record.childKey && c.parent.key !== record.parent.key);
   const counts = new Map<string, number>();
   for (const parent of agents) {
     const counted = new Set<string>();
@@ -220,7 +304,7 @@ export function correctedDelegateCounts(agents: Agent[], forwarders: ForwarderRe
     }
     for (const record of forwarders) {
       if (record.parent.key !== parent.key || counted.has(record.childKey)) continue;
-      if (sessionsDiffer(record.parent.sessionId, parent.sessionId)) continue;
+      if (sessionsDiffer(record.parent.sessionId, parent.sessionId) || movedFrom(record)) continue;
       const child = byKey.get(record.childKey);
       counted.add(record.childKey);
       if (child && DELEGATE_BUSY_STATES.has(child.state)) count += 1;

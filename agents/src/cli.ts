@@ -54,8 +54,11 @@ no delegation code. Links persist across idle turns until detach or close.
 Each child has one parent. Every inventory, and \`reconcile\`, repairs stale
 links: it re-pushes stale states, reinstalls missing forwarders, prunes
 children whose Neovim is dead or no longer has them, and rebuilds a restarted
-parent's links from the children's forwarders by session id. Neovim runs
-\`reconcile\` when a cc.nvim instance starts or resumes.`;
+parent's links from the children's forwarders by session id. When a session
+is open in two Neovims (an old tmux session survived a restart), links move to
+the copy with a live Claude process, the most recently active if several have
+one; with none, they stay put. Inventories warn about every such session.
+Neovim runs \`reconcile\` when a cc.nvim instance starts or resumes.`;
 
 function stderr(message: string) {
   console.error(`agents: ${message}`);
