@@ -175,8 +175,8 @@ export OPENSPACE_EMAIL=rob@openspace.ai
 
 alias brave='open -a "Brave Browser"'
 alias chrome='open -a "Google Chrome"'
-# reviews (PR's that need review assigned to me)
-alias rev='brave "https://github.com/openspacelabs/openspace/pulls/review-requested/robcmills"'
+# reviews: open each PR that needs my review in Brave (jarvis reviews)
+alias rev='jarvis reviews --open'
 
 # frontend
 alias ice='cd ~/src/openspace/web/icedemon/ && nv .'
