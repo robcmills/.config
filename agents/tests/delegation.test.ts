@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-  applyCorrections, correctedDelegateCounts, deriveDelegators, linkChild, planReconciliation,
+  applyCorrections, correctedDelegateCounts, deriveDelegators, duplicateSessionWarnings, linkChild, planReconciliation,
   reconcileDelegations, wouldCycle,
 } from "../src/delegation.ts";
 import type { Agent, DelegateChild, ForwarderRecord } from "../src/types.ts";
@@ -63,6 +63,75 @@ describe("planReconciliation", () => {
     expect(plan([child()], [forwarder()], [20])).toEqual([]);
     const twice = [parent([], { key: "11:3" }), parent([], { key: "12:3" }), child()];
     expect(plan(twice, [forwarder()], [11, 12, 20])).toEqual([]);
+  });
+});
+
+describe("a parent session open in two Neovims", () => {
+  // The old copy 10:1 keeps running beside a new copy 11:3 of session P.
+  const oldCopy = (children: DelegateChild[] = [], overrides: Partial<Agent> = {}) =>
+    parent(children, { pid: 100, lastModifiedAt: 1_000, ...overrides });
+  const newCopy = (children: DelegateChild[] = [], overrides: Partial<Agent> = {}) =>
+    parent(children, { key: "11:3", nvimPid: 11, outputBufnr: 3, socketPath: "/nvim.11", pid: 111, lastModifiedAt: 2_000, ...overrides });
+  const deadPids = (...dead: number[]) => (pid: number) => !dead.includes(pid);
+
+  test("moves the link from an old copy without a process to the copy with one", () => {
+    const agents = [oldCopy([entry()]), newCopy(), child()];
+    expect(plan(agents, [forwarder()], [10, 11, 20], deadPids(100))).toEqual([
+      ["register", "20:5", "11:3"], ["install", "20:5", "11:3"], ["unregister", "20:5", "10:1"],
+    ]);
+    // A copy with no Claude process at all counts as not running.
+    expect(plan([oldCopy([entry()], { pid: null }), newCopy(), child()], [forwarder()], [10, 11, 20])).toEqual([
+      ["register", "20:5", "11:3"], ["install", "20:5", "11:3"], ["unregister", "20:5", "10:1"],
+    ]);
+  });
+
+  test("keeps the link on the copy with the process even when it is older", () => {
+    const agents = [oldCopy([entry()]), newCopy([], { pid: 111 }), child()];
+    expect(plan(agents, [forwarder()], [10, 11, 20], deadPids(111))).toEqual([]);
+  });
+
+  test("leaves the link alone when neither copy has a running process", () => {
+    const agents = [oldCopy([entry()]), newCopy(), child()];
+    expect(plan(agents, [forwarder()], [10, 11, 20], deadPids(100, 111))).toEqual([]);
+  });
+
+  test("with two running processes the most recently active copy wins", () => {
+    expect(plan([oldCopy([entry()]), newCopy(), child()], [forwarder()], [10, 11, 20])).toEqual([
+      ["register", "20:5", "11:3"], ["install", "20:5", "11:3"], ["unregister", "20:5", "10:1"],
+    ]);
+    const oldIsNewer = [oldCopy([entry()], { lastModifiedAt: 3_000 }), newCopy(), child()];
+    expect(plan(oldIsNewer, [forwarder()], [10, 11, 20])).toEqual([]);
+  });
+
+  test("a stale registration on the old copy is pruned when the forwarder already points at the kept one", () => {
+    const toNew = forwarder({ parent: { key: "11:3", socket: "/nvim.11", bufnr: 3, sessionId: "P" } });
+    expect(plan([oldCopy([entry()]), newCopy([entry()]), child()], [toNew], [10, 11, 20], deadPids(100)))
+      .toEqual([["unregister", "20:5", "10:1"]]);
+  });
+
+  test("an old parent that is gone, with two candidates, relinks to the one with the process", () => {
+    const gone = forwarder({ parent: { key: "9:1", socket: "/nvim.9", bufnr: 1, sessionId: "P" } });
+    const agents = [oldCopy(), newCopy(), child()];
+    expect(plan(agents, [gone], [10, 11, 20], deadPids(111))).toEqual([["register", "20:5", "10:1"], ["install", "20:5", "10:1"]]);
+    expect(plan(agents, [gone], [10, 11, 20])).toEqual([["register", "20:5", "11:3"], ["install", "20:5", "11:3"]]);
+    expect(plan(agents, [gone], [10, 11, 20], deadPids(100, 111))).toEqual([]);
+  });
+
+  test("the old copy stops counting the moved child", () => {
+    const agents = [oldCopy([]), newCopy(), child()];
+    const corrections = planReconciliation({ agents, forwarders: [forwarder()], answered: new Set([10, 11, 20]), alive: deadPids(100) });
+    const counts = correctedDelegateCounts(agents, [forwarder()], corrections);
+    expect([counts.get("10:1"), counts.get("11:3")]).toEqual([0, 1]);
+  });
+
+  test("warns once per duplicated session, naming the copy with the process", () => {
+    const agents = [oldCopy([], { sessionId: "434743d0-aaaa" }), newCopy([], { sessionId: "434743d0-aaaa" }), child()];
+    expect(duplicateSessionWarnings(agents, deadPids(100))).toEqual([
+      "session 434743d0 is open in 10:1 and 11:3; close one (11:3 has the running process)",
+    ]);
+    expect(duplicateSessionWarnings(agents, deadPids(100, 111))[0]).toEndWith("(none has a running process)");
+    expect(duplicateSessionWarnings(agents, alive)[0]).toEndWith("(10:1 and 11:3 all have running processes)");
+    expect(duplicateSessionWarnings([oldCopy(), child()], alive)).toEqual([]);
   });
 });
 

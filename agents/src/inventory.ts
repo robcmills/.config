@@ -1,7 +1,7 @@
 import { basename, relative, sep } from "node:path";
 import { homedir } from "node:os";
 import { queryCcInstances } from "./cc-rpc.ts";
-import { reconcileDelegations } from "./delegation.ts";
+import { duplicateSessionWarnings, reconcileDelegations } from "./delegation.ts";
 import type { LinkDependencies } from "./delegation.ts";
 import { dedupeNeovimInstances, discoverNeovimInstances } from "./discover-neovim.ts";
 import { correlatePane, discoverProcessParents, discoverTmuxPanes } from "./discover-tmux.ts";
@@ -102,6 +102,7 @@ export async function buildInventory(
   const agents = batches.flat();
   // Every inventory repairs parent/child links it can see are stale.
   warnings.push(...await reconcileDelegations(agents, forwarders, answered, dependencies.reconcile));
+  warnings.push(...duplicateSessionWarnings(agents, dependencies.reconcile?.alive));
   agents.sort(createAgentComparator(config));
   warnings.sort();
   return { agents, warnings, forwarders };
