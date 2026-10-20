@@ -1,0 +1,15 @@
+# Ported from alacritty/alacritty.toml (2026-10-20). Ghostty sizes emoji with
+# U+FE0F (🛠️, ⏸️) as 2 cells, matching tmux and Neovim; Alacritty drew them as
+# 1 cell, which desynced tmux's cursor and spilled wrapped lines into the
+# Neovim buffers sidebar.
+
+font-family = "Hack Nerd Font Mono"
+font-size = 18
+
+window-decoration = false
+maximize = true
+
+command = /opt/homebrew/bin/bash -l
+
+# Cmd+P sends Ctrl-b, the tmux prefix
+keybind = super+p=text:\x02

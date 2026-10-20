@@ -17,7 +17,7 @@ local KEYS = {
 
 -- Fast app switching
 local fast_apps = {
-  [KEYS.A] = 'Alacritty',
+  [KEYS.A] = 'Ghostty',
   [KEYS.B] = 'Brave Browser',
   [KEYS.C] = 'Google Chrome',
   [KEYS.E] = 'Microsoft Edge',

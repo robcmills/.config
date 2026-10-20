@@ -15,7 +15,7 @@ local commands = {
     hs.execute('open -g "wispr-flow://start-hands-free"')
   end,
   ["open terminal"] = function()
-    hs.application.launchOrFocus("Alacritty")
+    hs.application.launchOrFocus("Ghostty")
   end,
   ["open browser"] = function()
     hs.application.launchOrFocus("Zen Browser")
