@@ -19,8 +19,8 @@ export function formatPickerLines(agents: Agent[]): string {
 }
 
 /**
- * Manual repair for changes no event reports (a SIGKILLed Neovim, a rename).
- * reload-sync keeps the old list until the new one is ready.
+ * Manual repair for changes no event reports (a SIGKILLed Neovim, tmux window
+ * changes). reload-sync keeps the old list until the new one is ready.
  */
 export function pickerRefreshBinding(bin = AGENTS_BIN): string {
   return `${REFRESH_KEY}:reload-sync(${shellQuote(bin)} ${PICKER_ROWS_FLAG})`;
@@ -34,13 +34,14 @@ export function pickerWarningSummary(warningCount: number): string | null {
 
 /**
  * Where open popups listen. picker-notify.lua, loaded in every Neovim, connects
- * to each `<pid>.sock` here on cc.nvim's CcStateChanged.
+ * to each `<pid>.sock` here on cc.nvim's CcStateChanged and CcRenamed, and
+ * writes renames to each `spawn-<pid>.sock` (a waiting `jarvis spawn`).
  */
 export function pickerDir(env: Record<string, string | undefined> = process.env): string {
   return env.AGENTS_PICKER_DIR || `/tmp/agents-picker.${env.USER || "unknown"}`;
 }
 
-/** Delete the files of popups that died without cleaning up. */
+/** Delete the files of popups and spawns that died without cleaning up. */
 export function pruneStalePickers(dir: string, alive: (pid: number) => boolean = isProcessAlive): void {
   let entries: string[];
   try {
@@ -49,7 +50,7 @@ export function pruneStalePickers(dir: string, alive: (pid: number) => boolean =
     return;
   }
   for (const entry of entries) {
-    const pid = Number(entry.match(/^(\d+)\./)?.[1]);
+    const pid = Number(entry.match(/^(?:spawn-)?(\d+)\./)?.[1]);
     if (Number.isSafeInteger(pid) && pid > 0 && !alive(pid)) rmSync(join(dir, entry), { force: true });
   }
 }

@@ -143,9 +143,9 @@ test("closing a session deletes its files and stops listening", async () => {
 
 test("stale files of dead popups are pruned, live and foreign ones kept", () => {
   const dir = tempDir();
-  for (const name of ["11.sock", "11.fzf.sock", "11.rows", "22.sock", "notes.txt"]) writeFileSync(join(dir, name), "");
+  for (const name of ["11.sock", "11.fzf.sock", "11.rows", "22.sock", "spawn-11.sock", "spawn-22.sock", "notes.txt"]) writeFileSync(join(dir, name), "");
   pruneStalePickers(dir, (pid) => pid === 22);
-  expect(readdirSync(dir).sort()).toEqual(["22.sock", "notes.txt"]);
+  expect(readdirSync(dir).sort()).toEqual(["22.sock", "notes.txt", "spawn-22.sock"]);
   pruneStalePickers(join(dir, "missing"));
 });
 
@@ -212,4 +212,47 @@ test("picker-notify.lua pokes open popups on CcStateChanged, from a real Neovim"
   expect((await fire("CcStateChanged")).exitCode).toBe(0);
   rmSync(dir, { recursive: true, force: true });
   expect((await fire("CcStateChanged")).exitCode).toBe(0);
+});
+
+test("picker-notify.lua pokes popups on CcRenamed and writes the rename to waiting spawns", async () => {
+  const dir = tempDir();
+  const { s } = session(dir, async () => [agent()]);
+  let changes = 0;
+  const original = s.coalescer.changed;
+  s.coalescer.changed = () => { changes++; original(); };
+  const lines: string[] = [];
+  const spawnSocket = join(dir, `spawn-${process.pid}.sock`);
+  const server = Bun.listen<undefined>({
+    unix: spawnSocket,
+    socket: { data(_socket, chunk) { lines.push(...chunk.toString().split("\n").filter(Boolean)); } },
+  });
+  cleanup.unshift(() => server.stop(true));
+  writeFileSync(join(dir, "spawn-999999.sock"), "");
+
+  const nvimDir = tempDir();
+  const socket = join(nvimDir, "nvim.sock");
+  const notifier = join(import.meta.dir, "../src/picker-notify.lua");
+  const proc = Bun.spawn(["nvim", "--headless", "--clean", "--listen", socket, "-c", `luafile ${notifier}`], {
+    stdout: "ignore", stderr: "ignore", stdin: "ignore",
+    env: { ...process.env, AGENTS_PICKER_DIR: dir },
+  });
+  cleanup.unshift(() => proc.kill("SIGKILL"));
+  await until(() => existsSync(socket), "Neovim's socket");
+
+  const fire = (data: string) => runCommand(["nvim", "--server", socket, "--remote-expr",
+    `luaeval("vim.api.nvim_exec_autocmds('User', { pattern = 'CcRenamed', data = ${data} }) or 1")`], 2_000);
+  expect((await fire("{ bufnr = 5, name = 'naming...', transient = true }")).exitCode).toBe(0);
+  expect((await fire("{ bufnr = 5, name = 'worker', transient = false, previous = 'naming...' }")).exitCode).toBe(0);
+  await until(() => lines.length === 2 && changes >= 1, "the rename lines and poke");
+  expect(lines.map((line) => JSON.parse(line))).toEqual([
+    { key: `${proc.pid}:5`, name: "naming...", transient: true },
+    { key: `${proc.pid}:5`, name: "worker", transient: false },
+  ]);
+  // A state change pokes popups but writes nothing to spawns.
+  const before = changes;
+  expect((await runCommand(["nvim", "--server", socket, "--remote-expr",
+    `luaeval("vim.api.nvim_exec_autocmds('User', { pattern = 'CcStateChanged', data = { bufnr = 5, state = 'working' } }) or 1")`], 2_000)).exitCode).toBe(0);
+  await until(() => changes > before, "the state poke");
+  await Bun.sleep(50);
+  expect(lines.length).toBe(2);
 });
