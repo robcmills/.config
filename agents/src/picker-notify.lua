@@ -10,6 +10,11 @@
 -- with no cc.nvim instance never fires either event; with nothing listening,
 -- the cost is one scandir of an empty or missing directory.
 --
+-- On `VimEnter`, once init.lua and cc.nvim are loaded, write one
+-- `{"ready":true,"pid","socket","cwd"}` line to every `spawn-<pid>.sock`, so a
+-- `jarvis spawn` that just opened this Neovim's window can use it. Same cost
+-- when nobody waits: one scandir.
+--
 -- The directory must match pickerDir() in picker.ts.
 local dir = vim.env.AGENTS_PICKER_DIR
 if not dir or dir == '' then dir = '/tmp/agents-picker.' .. (vim.env.USER or 'unknown') end
@@ -27,6 +32,17 @@ local function send(path, payload)
       pipe:shutdown(function() pipe:close() end)
     end)
   end)
+end
+
+--- Send `payload` to every `spawn-<pid>.sock` in the picker directory.
+local function to_spawns(payload)
+  local handle = uv.fs_scandir(dir)
+  if not handle then return end
+  while true do
+    local name = uv.fs_scandir_next(handle)
+    if not name then return end
+    if name:match('^spawn%-%d+%.sock$') then send(dir .. '/' .. name, payload) end
+  end
 end
 
 local function notify(ev)
@@ -54,8 +70,24 @@ local function notify(ev)
   end
 end
 
+local group = vim.api.nvim_create_augroup('agents_picker_notify', { clear = true })
+
 vim.api.nvim_create_autocmd('User', {
-  group = vim.api.nvim_create_augroup('agents_picker_notify', { clear = true }),
+  group = group,
   pattern = { 'CcStateChanged', 'CcRenamed' },
   callback = notify,
+})
+
+vim.api.nvim_create_autocmd('VimEnter', {
+  group = group,
+  once = true,
+  callback = function()
+    if vim.v.servername == '' then return end
+    to_spawns(vim.json.encode({
+      ready = true,
+      pid = vim.fn.getpid(),
+      socket = vim.v.servername,
+      cwd = vim.fn.getcwd(),
+    }) .. '\n')
+  end,
 })
