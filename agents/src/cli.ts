@@ -6,7 +6,7 @@ import {
 } from "./control.ts";
 import { formatTsv } from "./format.ts";
 import { buildInventory, reconcileOnly } from "./inventory.ts";
-import { formatPickerLines, pickAgent, PICKER_ROWS_FLAG } from "./picker.ts";
+import { formatPickerLines, openPickerSession, pickAgent, PICKER_ROWS_FLAG, resolvePicked } from "./picker.ts";
 import { validateConfig } from "./sort.ts";
 import { emptyInventoryWarningNotification, focusAndSwitch, notifyTmux } from "./switch.ts";
 import type { InventoryResult } from "./types.ts";
@@ -14,7 +14,8 @@ import type { InventoryResult } from "./types.ts";
 const HELP = `Usage:
   agents                 Print live agents as stable TSV
   agents --json          Print live agents as JSON
-  agents -i              Pick and switch to a live agent
+  agents -i              Pick and switch to a live agent. Rows update when an
+                         agent changes state; ctrl-r reloads by hand
   agents -i --pause-on-error
                          Keep an interactive popup open on fatal errors
   agents switch <key>    Switch directly to one live agent
@@ -135,25 +136,35 @@ async function run(args: string[]): Promise<number> {
     }
     return 0;
   }
-  // Internal: the picker's periodic fzf reload.
+  // Internal: the picker's manual (ctrl-r) fzf reload.
   if (args.length === 1 && args[0] === PICKER_ROWS_FLAG) {
     process.stdout.write(formatPickerLines((await inventory(false)).agents));
     return 0;
   }
   if (args.length === 1 && args[0] === "-i") {
-    const result = await inventory(false);
-    if (result.agents.length === 0) {
-      if (result.warnings.length > 0) {
-        await notifyTmux(emptyInventoryWarningNotification(result.warnings.length));
-      } else {
-        await notifyTmux("agents: no running cc.nvim agents");
+    const agentsNow = async () => (await inventory(false)).agents;
+    // Listen before the first inventory, so a change during it is not lost.
+    const session = openPickerSession({ inventory: agentsNow });
+    let result: InventoryResult;
+    let key: string | null;
+    try {
+      result = await inventory(false);
+      if (result.agents.length === 0) {
+        if (result.warnings.length > 0) {
+          await notifyTmux(emptyInventoryWarningNotification(result.warnings.length));
+        } else {
+          await notifyTmux("agents: no running cc.nvim agents");
+        }
+        return 0;
       }
-      return 0;
+      key = await pickAgent(result.agents, result.warnings.length, session);
+    } finally {
+      // Before switching, which itself changes agent states.
+      session.close();
     }
-    const key = await pickAgent(result.agents, result.warnings.length);
     if (key === null) return 0;
-    const agent = result.agents.find((candidate) => candidate.key === key);
-    if (!agent) throw new Error(`picker returned an unknown agent key: ${key}`);
+    const agent = await resolvePicked(key, [session.latest(), result.agents], agentsNow);
+    if (!agent) throw new Error(`the picked agent is gone: ${key}`);
     // focus_instance verifies that the selected agent still exists, so a
     // second full inventory would only duplicate discovery and RPC work.
     await focusAndSwitch(agent);

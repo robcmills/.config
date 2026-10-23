@@ -19,7 +19,7 @@ const forwarder = (overrides: Partial<ForwarderRecord> = {}): ForwarderRecord =>
   name: "f", childKey: "20:5", childBufnr: 5, nvimPid: 20, socketPath: "/nvim.20",
   parent: { key: "10:1", socket: "/nvim.10", bufnr: 1, sessionId: "P" }, ...overrides,
 });
-const alive = () => true;
+const alive = (_pid: number) => true;
 const plan = (agents: Agent[], forwarders: ForwarderRecord[], answered: number[], isAlive = alive) =>
   planReconciliation({ agents, forwarders, answered: new Set(answered), alive: isAlive })
     .map((c) => [c.kind, c.kind === "uninstall" ? c.childKey : c.kind === "unregister" ? c.childKey : c.child.key, c.kind === "uninstall" ? c.parentKey : c.parent.key]);
