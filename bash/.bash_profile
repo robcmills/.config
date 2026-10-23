@@ -103,8 +103,6 @@ alias gt='recent_branches'
 
 # password
 alias pw="~/password.sh"
-# api keys env vars and secrets
-source ~/.keys
 
 # disk usage
 alias dus="du -hs .[^.]* | sort -h"
@@ -400,6 +398,13 @@ export PATH
 # rust
 . "$HOME/.cargo/env"
 
+# pnpm/npm shims fetch NPM_TOKEN from 1Password for registry calls; must
+# precede the fnm and Homebrew bins
+export PATH="$HOME/.local/shims:$PATH"
+
 #THIS MUST BE AT THE END OF THE FILE FOR SDKMAN TO WORK!!!
 export SDKMAN_DIR="$HOME/.sdkman"
 [[ -s "$HOME/.sdkman/bin/sdkman-init.sh" ]] && source "$HOME/.sdkman/bin/sdkman-init.sh"
+
+# Jarvis voice engine (~/src/voice); extra args pass through, e.g. voice --optimistic
+alias voice='uv run --directory ~/src/voice voice'

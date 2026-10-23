@@ -29,7 +29,7 @@ local fast_apps = {
   [KEYS.R] = 'Cursor',
   [KEYS.S] = 'Slack',
   [KEYS.T] = 'Cypress',
-  [KEYS.V] = 'Visual Studio Code',
+  [KEYS.V] = 'Preview',
   [KEYS.W] = 'Warp',
   [KEYS.Y] = 'Activity Monitor',
   [KEYS.Z] = 'Zen Browser',
@@ -63,5 +63,9 @@ end)
 -- Voice command system (wake word + commands)
 -- local voice = require("voice")
 -- voice.start()
+
+-- Live STT comparison panels for the ~/src/voice engine (`uv run voice`)
+package.path = package.path .. ";" .. os.getenv("HOME") .. "/src/voice/hammerspoon/?.lua"
+require("voice_panels")
 
 hs.alert.show('Config loaded')
