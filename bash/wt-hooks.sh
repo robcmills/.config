@@ -16,6 +16,33 @@ wt_hook_defaults() {
   esac
 }
 
+# Install deps and generated sources in the background so the tmux window
+# opens right away. The log lives in the worktree's git dir, out of `git
+# status`, and goes away with `wt rm`. Every fd is redirected so callers that
+# read wt's stdout/stderr (jarvis new) don't wait on the install.
+wt_openspace_install() {
+  local worktree="$1"
+  local icedemon="$worktree/web/icedemon"
+  local log
+  log="$(git -C "$worktree" rev-parse --absolute-git-dir)/wt-install.log"
+  # Resolve pnpm before fnm switches node: ~/.local/shims/pnpm supplies
+  # NPM_TOKEN, and fnm exec would put node's own pnpm ahead of it on PATH.
+  local pnpm node_version
+  pnpm="$(command -v pnpm)" || { echo "wt: pnpm not found; skipping install" >&2; return 0; }
+  node_version="$(cat "$icedemon/.nvmrc" 2>/dev/null || true)"
+  local -a run=()
+  if [ -n "$node_version" ] && command -v fnm >/dev/null 2>&1; then
+    run=(fnm exec --using="$node_version" --)
+  fi
+  (
+    cd "$icedemon" || exit 1
+    nohup ${run[@]+"${run[@]}"} bash -c \
+      'echo "[wt] $(date) pnpm install"; "$1" install && "$1" after-install; rc=$?; echo "[wt] $(date) exit $rc"' \
+      _ "$pnpm" </dev/null >"$log" 2>&1 &
+  )
+  echo "wt: pnpm install running in background; log: $log" >&2
+}
+
 wt_hook_post_new() {
   local basename="$1" repo="$2" worktree="$3"
   case "$basename" in
@@ -26,6 +53,7 @@ wt_hook_post_new() {
       mkdir -p "$dst_local"
       cp "$src_local/BuildDev.js" "$dst_local/BuildDev.js"
       cp "$src_local/BuildProd.js" "$dst_local/BuildProd.js"
+      wt_openspace_install "$worktree"
       ;;
   esac
 }

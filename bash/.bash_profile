@@ -217,7 +217,7 @@ alias lnvm=". $NVM_DIR/nvm.sh"
 export AWS_PROFILE=os-dev 
 export AWS_REGION=us-west-2
 alias ai='aws sts get-caller-identity' # am I logged in?
-alias al='aws sso login --profile os-dev' # login
+alias al='aws sso login --profile os-dev-sso' # login (os-dev itself goes through aws-sso-notify.sh)
 
 # https://docs.anthropic.com/en/docs/claude-code/amazon-bedrock
 # Enable Bedrock integration for Claude Code
