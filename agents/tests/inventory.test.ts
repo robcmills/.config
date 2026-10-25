@@ -1,7 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import { homedir } from "node:os";
-import { buildInventory, projectFromCwd, reconcileOnly } from "../src/inventory.ts";
+import { buildInventory, heldMessageWarnings, projectFromCwd, reconcileOnly } from "../src/inventory.ts";
 import type { AgentsConfig, CcInstanceSnapshot } from "../src/types.ts";
+import { agent } from "./fixtures.ts";
+
+test("warns for each message held right now, not for dropped ones", () => {
+  const hold = { messageUuid: "m1", from: "uds:/tmp/cc-socks/1.sock", fromName: "worker", state: "held" as const, cause: "mode-mismatch", outcome: null, at: 1 };
+  const agents = [
+    agent({ name: "jarvis", peerHolds: [hold, { ...hold, messageUuid: "m2", state: "dropped", outcome: "expired" }] }),
+    agent({ name: null, key: "9:9", peerHolds: [{ ...hold, fromName: null, cause: null }] }),
+  ];
+  expect(heldMessageWarnings(agents)).toEqual([
+    "jarvis is holding a message from worker (mode-mismatch); it expires undelivered unless both sessions run in the same permission mode",
+    "9:9 is holding a message from uds:/tmp/cc-socks/1.sock (unknown cause); it expires undelivered unless both sessions run in the same permission mode",
+  ]);
+});
 
 const config: AgentsConfig = {
   sort: { by: ["project", "status", "name"], projectOrder: ["openspace*"], statusOrder: ["waiting", "working", "ready", "starting"] },
@@ -11,7 +24,7 @@ const snapshot = (overrides: Partial<CcInstanceSnapshot> = {}): CcInstanceSnapsh
   outputBufnr: 4, promptBufnr: 5, sessionId: "s", name: "n", provider: "claude",
   model: "opus", cwd: `${homedir()}/src/openspace-a/web`, pid: 90,
   state: "ready", turnElapsedMs: null, backgroundTaskCount: 0,
-  lastModifiedAt: 1_700_000_000_000, delegateCount: 0, children: [], ...overrides,
+  lastModifiedAt: 1_700_000_000_000, delegateCount: 0, children: [], permissionMode: null, peerHolds: [], ...overrides,
 });
 
 test("project labels use the first ~/src component and basename elsewhere", () => {

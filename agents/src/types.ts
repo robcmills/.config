@@ -30,6 +30,21 @@ export interface CcInstanceSnapshot {
   delegateCount: number;
   /** Children registered with this agent, as it last heard from them. */
   children: DelegateChild[];
+  /** The CLI's live permission mode; null before its init or from an older cc.nvim. */
+  permissionMode: string | null;
+  /** Cross-session messages the CLI held or dropped instead of delivering. */
+  peerHolds: PeerHold[];
+}
+
+/** A cross-session message this agent's CLI parked (`held`) or gave up on (`dropped`). */
+export interface PeerHold {
+  messageUuid: string;
+  from: string;
+  fromName: string | null;
+  state: "held" | "dropped";
+  cause: string | null;
+  outcome: string | null;
+  at: number;
 }
 
 export interface DelegateChild {

@@ -27,11 +27,14 @@ const HELP = `Usage:
 
   agents new socket=<path> cwd=<dir> [prompt=<text>|prompt-file=<path>]
              [model=<m>] [effort=<e>] [name=<n>] [provider=claude|codex]
-             [focus=true|false] [from=auto|none|<key>]
+             [focus=true|false] [from=auto|none|<key>] [permission-mode=<m>]
                          Open a cc.nvim instance in that Neovim; prints its key.
                          from= picks its parent: auto (default) links it to the
                          agent running this command, if any. Warns when the
-                         link cannot be tracked
+                         link cannot be tracked. A Claude agent starts in its
+                         Claude parent's live permission mode unless
+                         permission-mode= is given, so its messages to the
+                         parent are not held
   agents send key=<k> prompt=<text>|prompt-file=<path> [from=auto|none|<key>]
                          Queue a prompt; refuses while the agent is mid-turn.
                          Links an unlinked agent to from= (default: the caller);
@@ -222,13 +225,21 @@ function readPrompt(parsed: NamedArgs): string | undefined {
 
 const controlDependencies = { inventory: () => inventory() };
 
+/** Modes `claude --permission-mode` accepts. */
+const PERMISSION_MODES = ["acceptEdits", "auto", "bypassPermissions", "default", "dontAsk", "plan"];
+
 async function runNew(args: string[]): Promise<number> {
   const parsed = parseNamedArgs(args, {
-    keys: ["socket", "cwd", "prompt", "prompt-file", "model", "effort", "name", "provider", "focus", "from"],
+    keys: ["socket", "cwd", "prompt", "prompt-file", "model", "effort", "name", "provider", "focus", "from", "permission-mode"],
   });
   const provider = parsed.values.get("provider");
   if (provider !== undefined && provider !== "claude" && provider !== "codex") {
     stderr(`invalid provider '${provider}'; expected claude or codex`);
+    return 2;
+  }
+  const permissionMode = parsed.values.get("permission-mode");
+  if (permissionMode !== undefined && !PERMISSION_MODES.includes(permissionMode)) {
+    stderr(`invalid permission-mode '${permissionMode}'; expected one of ${PERMISSION_MODES.join(", ")}`);
     return 2;
   }
   const key = await newAgent({
@@ -241,6 +252,7 @@ async function runNew(args: string[]): Promise<number> {
     provider,
     focus: parseBoolean(parsed.values.get("focus"), "focus"),
     from: parseFrom(parsed.values.get("from")),
+    permission_mode: permissionMode,
   }, { inventory: () => inventory(false) });
   console.log(key);
   return 0;

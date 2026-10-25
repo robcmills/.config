@@ -14,6 +14,7 @@ import {
   sendToAgent,
   tailAgent,
 } from "../src/control.ts";
+import type { CcOpenOptions } from "../src/cc-rpc.ts";
 import type { AgentState } from "../src/types.ts";
 import { agent } from "./fixtures.ts";
 
@@ -84,6 +85,40 @@ describe("new", () => {
     });
     expect(key).toBe("999:5");
     expect(warnings).toEqual(["999:5 is not tracked as a child of 50:1: the parent cc.nvim has no delegation receiver"]);
+  });
+
+  test("a Claude child starts in its Claude parent's live permission mode", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agents-"));
+    const socket = join(dir, "nvim.999.0");
+    writeFileSync(socket, "");
+    const opened: CcOpenOptions[] = [];
+    const open = async (_socket: string, options: CcOpenOptions) => { opened.push(options); return { ok: true, bufnr: 5, pid: 999 }; };
+    const link = { register: async () => ({ ok: true }), install: async () => ({ ok: true }) };
+    const warnings: string[] = [];
+    const warn = (message: string) => warnings.push(message);
+    const deps = (permissionMode: string | null) => ({
+      open, link, warn, callerContext: fromJarvis,
+      inventory: async () => ({ agents: [{ ...jarvis, provider: "claude" as const, permissionMode }], warnings: [] }),
+    });
+
+    await newAgent({ socket, cwd: dir }, deps("auto"));
+    await newAgent({ socket, cwd: dir, permission_mode: "plan" }, deps("auto"));
+    await newAgent({ socket, cwd: dir, provider: "codex" }, deps("auto"));
+    await newAgent({ socket, cwd: dir, from: "none" }, deps("auto"));
+    await newAgent({ socket, cwd: dir }, { ...deps("auto"), callerContext: shell });
+    expect(opened.map((options) => options.permission_mode)).toEqual(["auto", "plan", undefined, undefined, undefined]);
+    expect(warnings).toEqual([]);
+
+    // A Claude parent whose mode is unknown: cc.nvim's default, with a warning.
+    await newAgent({ socket, cwd: dir }, deps(null));
+    expect(opened.at(-1)!.permission_mode).toBeUndefined();
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("50:1's permission mode is unknown");
+
+    // A codex parent's mode means nothing to Claude.
+    await newAgent({ socket, cwd: dir }, { ...deps(null), inventory: async () => ({ agents: [{ ...jarvis, permissionMode: "never" }], warnings: [] }) });
+    expect(opened.at(-1)!.permission_mode).toBeUndefined();
+    expect(warnings).toHaveLength(1);
   });
 
   test("surfaces the RPC error", async () => {

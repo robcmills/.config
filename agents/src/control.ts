@@ -109,7 +109,7 @@ function isDirectory(path: string): boolean {
 async function parentForNew(
   from: FromSpec,
   dependencies: Partial<Pick<ControlDependencies, "inventory" | "callerContext">>,
-): Promise<ParentRef | undefined> {
+): Promise<Agent | undefined> {
   if (from === "none" || !dependencies.inventory) return undefined;
   let agents: Agent[];
   try {
@@ -118,8 +118,29 @@ async function parentForNew(
     if (from !== "auto") throw error;
     return undefined;
   }
-  const parent = await resolveParent(from, agents, dependencies);
-  return parent ? parentRefOf(parent) : undefined;
+  return await resolveParent(from, agents, dependencies) ?? undefined;
+}
+
+/**
+ * The permission mode a new Claude agent starts in: the one asked for, else
+ * its Claude parent's live mode. Claude Code holds a cross-session message
+ * whose sender runs in another permission class, and cc.nvim has no way to
+ * approve it, so a child in its parent's mode is what lets its reports
+ * arrive. The child is never more permissive than the parent this way.
+ * Undefined leaves cc.nvim's configured default; `warning` says why when a
+ * parent was found but its mode was not.
+ */
+export function inheritedPermissionMode(
+  options: Pick<CcOpenOptions, "permission_mode" | "provider">,
+  parent: Agent | undefined,
+): { mode?: string; warning?: string } {
+  if (options.permission_mode !== undefined) return { mode: options.permission_mode };
+  if (!parent || parent.provider !== "claude" || options.provider === "codex") return {};
+  if (parent.permissionMode) return { mode: parent.permissionMode };
+  return {
+    warning: `${parent.key}'s permission mode is unknown (cc.nvim predates permissionMode, or its session has not started); `
+      + "the new agent starts in cc.nvim's configured mode, and if that differs its messages to the parent are held",
+  };
 }
 
 /**
@@ -138,14 +159,17 @@ export async function newAgent(
   if (!existsSync(options.socket)) throw new Error(`socket not found: ${options.socket}`);
   const { socket, cwd: _ignored, from = "auto", ...rest } = options;
   const parent = await parentForNew(from, dependencies);
-  const result = await (dependencies.open ?? openCcInstance)(socket, { ...rest, cwd });
+  const warn = dependencies.warn ?? defaultWarn;
+  const inherited = inheritedPermissionMode(rest, parent);
+  if (inherited.warning) warn(inherited.warning);
+  const result = await (dependencies.open ?? openCcInstance)(socket, { ...rest, permission_mode: inherited.mode, cwd });
   if (!result.ok || result.bufnr === undefined || result.pid === undefined) {
     throw new Error(result.error || "cc.nvim open failed");
   }
   const key = `${result.pid}:${result.bufnr}`;
   if (parent) {
     const child = { key, socket, bufnr: result.bufnr, nvimPid: result.pid, sessionId: null, state: "starting" as const };
-    for (const warning of await linkChild(parent, child, dependencies.link)) (dependencies.warn ?? defaultWarn)(warning);
+    for (const warning of await linkChild(parentRefOf(parent), child, dependencies.link)) warn(warning);
   }
   return key;
 }
