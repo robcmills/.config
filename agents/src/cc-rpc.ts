@@ -2,17 +2,19 @@ import { readFileSync } from "node:fs";
 import { runCommand } from "./command.ts";
 import { AGENT_STATES } from "./types.ts";
 import type {
-  AgentState, CcInstanceSnapshot, CommandRunner, DelegateChild, ForwarderRecord, ParentRef, Provider,
+  AgentState, CcInstanceSnapshot, CommandRunner, DelegateChild, ForwarderRecord, ParentRef, PeerHold, Provider,
 } from "./types.ts";
 
 type RawCcInstanceSnapshot = Omit<
   CcInstanceSnapshot,
-  "backgroundTaskCount" | "lastModifiedAt" | "delegateCount" | "children"
+  "backgroundTaskCount" | "lastModifiedAt" | "delegateCount" | "children" | "permissionMode" | "peerHolds"
 > & {
   backgroundTaskCount?: number;
   lastModifiedAt?: number | null;
   delegateCount?: unknown;
   children?: unknown;
+  permissionMode?: unknown;
+  peerHolds?: unknown;
 };
 
 // Snapshots plus the delegation forwarders `agents` installed in this Neovim
@@ -78,6 +80,29 @@ export function normalizeChildren(value: unknown): DelegateChild[] {
   return children;
 }
 
+/** cc.nvim's held and dropped cross-session messages; malformed entries are dropped. */
+export function normalizePeerHolds(value: unknown): PeerHold[] {
+  // An empty Lua table may encode as {} rather than [].
+  if (!Array.isArray(value)) return [];
+  const holds: PeerHold[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const v = entry as Record<string, unknown>;
+    if (typeof v.messageUuid !== "string" || (v.state !== "held" && v.state !== "dropped")
+        || !Number.isFinite(v.at)) continue;
+    holds.push({
+      messageUuid: v.messageUuid,
+      from: typeof v.from === "string" ? v.from : "",
+      fromName: optionalString(v.fromName),
+      state: v.state,
+      cause: optionalString(v.cause),
+      outcome: optionalString(v.outcome),
+      at: v.at as number,
+    });
+  }
+  return holds;
+}
+
 /** Forwarder registry entries; malformed ones are dropped. */
 export function normalizeForwarders(value: unknown): Omit<ForwarderRecord, "nvimPid" | "socketPath">[] {
   if (!Array.isArray(value)) return [];
@@ -134,6 +159,8 @@ export async function queryCcInstances(
         delegateCount: Number.isSafeInteger(snapshot.delegateCount) && (snapshot.delegateCount as number) > 0
           ? snapshot.delegateCount as number : 0,
         children: normalizeChildren(snapshot.children),
+        permissionMode: optionalString(snapshot.permissionMode),
+        peerHolds: normalizePeerHolds(snapshot.peerHolds),
       })),
     };
   } catch {

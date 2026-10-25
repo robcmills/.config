@@ -103,9 +103,22 @@ export async function buildInventory(
   // Every inventory repairs parent/child links it can see are stale.
   warnings.push(...await reconcileDelegations(agents, forwarders, answered, dependencies.reconcile));
   warnings.push(...duplicateSessionWarnings(agents, dependencies.reconcile?.alive));
+  warnings.push(...heldMessageWarnings(agents));
   agents.sort(createAgentComparator(config));
   warnings.sort();
   return { agents, warnings, forwarders };
+}
+
+/**
+ * One warning per cross-session message an agent's CLI is holding right now.
+ * cc.nvim cannot approve it, so it expires undelivered unless the sender's
+ * permission mode comes to match; the warning goes when the CLI drops or
+ * releases it. Dropped messages stay in `peerHolds` but do not warn.
+ */
+export function heldMessageWarnings(agents: Agent[]): string[] {
+  return agents.flatMap((agent) => agent.peerHolds.filter((hold) => hold.state === "held").map((hold) =>
+    `${agent.name ?? agent.key} is holding a message from ${hold.fromName ?? (hold.from || "another session")} `
+    + `(${hold.cause ?? "unknown cause"}); it expires undelivered unless both sessions run in the same permission mode`));
 }
 
 /**

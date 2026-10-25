@@ -75,3 +75,22 @@ test("focus validates the numeric buffer before constructing RPC arguments", asy
   expect(called).toBe(false);
   expect((await focusCcInstance("/socket", 42, 100, run)).ok).toBe(true);
 });
+
+test("cc inventory carries the live permission mode and held messages; older cc.nvim reads as unknown", async () => {
+  const base = { outputBufnr: 1, promptBufnr: 2, sessionId: null, name: null, provider: "claude", model: null, cwd: "/x", pid: 3, state: "ready", turnElapsedMs: null };
+  const run: CommandRunner = async () => ({
+    stdout: JSON.stringify({ instances: [
+      { ...base, permissionMode: "auto", peerHolds: [
+        { messageUuid: "m1", from: "uds:/a", fromName: "worker", state: "dropped", cause: "mode-mismatch", outcome: "expired", at: 5 },
+        { messageUuid: "m2", state: "released", at: 6 },
+      ] },
+      { ...base, outputBufnr: 3, peerHolds: {} },
+    ], forwarders: [] }),
+    stderr: "", exitCode: 0, timedOut: false,
+  });
+  const [first, second] = (await queryCcInstances("/socket", 100, run)).snapshots ?? [];
+  expect(first?.permissionMode).toBe("auto");
+  expect(first?.peerHolds).toEqual([{ messageUuid: "m1", from: "uds:/a", fromName: "worker", state: "dropped", cause: "mode-mismatch", outcome: "expired", at: 5 }]);
+  expect(second?.permissionMode).toBeNull();
+  expect(second?.peerHolds).toEqual([]);
+});
