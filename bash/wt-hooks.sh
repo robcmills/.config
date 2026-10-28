@@ -34,10 +34,26 @@ wt_openspace_install() {
   if [ -n "$node_version" ] && command -v fnm >/dev/null 2>&1; then
     run=(fnm exec --using="$node_version" --)
   fi
+  # The shim execs the first other pnpm on PATH. If node's bin dir has no
+  # pnpm, that is another node's corepack shim, which crashes under this
+  # node (ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING). So give this node its own
+  # pnpm via its own corepack, which still honours packageManager.
+  local script='
+    echo "[wt] $(date) pnpm install"
+    bin=$(dirname "$(command -v node)")
+    if [ ! -x "$bin/pnpm" ]; then
+      if [ -x "$bin/corepack" ]; then
+        echo "[wt] node $(node -v) has no pnpm; running corepack enable pnpm"
+        "$bin/corepack" enable pnpm || { echo "[wt] corepack enable pnpm failed"; echo "[wt] $(date) exit 1"; exit 1; }
+      else
+        echo "[wt] node $(node -v) has neither pnpm nor corepack in $bin; install pnpm for this node"
+        echo "[wt] $(date) exit 1"; exit 1
+      fi
+    fi
+    "$1" install && "$1" after-install; rc=$?; echo "[wt] $(date) exit $rc"'
   (
     cd "$icedemon" || exit 1
-    nohup ${run[@]+"${run[@]}"} bash -c \
-      'echo "[wt] $(date) pnpm install"; "$1" install && "$1" after-install; rc=$?; echo "[wt] $(date) exit $rc"' \
+    nohup ${run[@]+"${run[@]}"} bash -c "$script" \
       _ "$pnpm" </dev/null >"$log" 2>&1 &
   )
   echo "wt: pnpm install running in background; log: $log" >&2
